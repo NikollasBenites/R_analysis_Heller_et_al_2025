@@ -1,7 +1,7 @@
 
 # Functions to work with PCA -----------------------------------------------------
 # Load the file -------------------------------------------------------
-load_data <- function(filename, dir_path = getwd(), make_id = TRUE) {
+load_data <- function(filename, dir_path = "~/Documents/R_PCA_files/R_PCA_Heller_et_al_2025/CSV_files", make_id = TRUE) {
   file_path <- file.path(dir_path, filename)  # Construct full file path
   if (make_id){
   df <- read_delim(file_path, 
@@ -703,7 +703,7 @@ vp_by_var <- function(data, cluster_col, separate = FALSE, center_line = NULL, l
     plot <- ggplot(df_long, aes(x = .data[[cluster_col]], y = Value, fill = .data[[cluster_col]])) +
       geom_violin(trim = FALSE, alpha = 0.7,width = 0.4) +
       stat_summary(fun = center_fun, geom = "crossbar", width = 0.3, color = "black", linewidth = 0.2) +
-      geom_jitter(width = 0.15, alpha = 0.4, shape = 21, color = "black") +
+      geom_jitter(width = 0.2, alpha = 0.4, shape = 21, color = "black") +
       facet_wrap(~Variable, nrow = 2,scales = "free_y",labeller = label_value) +
       custom_colors +
       theme_minimal() +
@@ -725,7 +725,7 @@ vp_by_var <- function(data, cluster_col, separate = FALSE, center_line = NULL, l
         ggplot(sub_data, aes(x = .data[[cluster_col]], y = Value, fill = .data[[cluster_col]])) +
           geom_violin(trim = FALSE, alpha = 0.7) +
           stat_summary(fun = center_fun, geom = "crossbar", width = 0.3, color = "black", linewidth = 0.2) +
-          geom_jitter(width = 0.15, alpha = 0.4, shape = 21, color = "black", fill = "black") +
+          geom_jitter(width = 0.2, alpha = 0.4, shape = 21, color = "black", fill = "black") +
           custom_colors +
           theme_minimal() +
           theme(
@@ -742,6 +742,136 @@ vp_by_var <- function(data, cluster_col, separate = FALSE, center_line = NULL, l
     return(plots)
   }
 }
+
+vp_by_var_stats <- function(data, cluster_col, separate = FALSE, center_line = NULL, legend = TRUE) {
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(car)
+  library(stats)
+  
+  is_categorical <- is.factor(data[[cluster_col]]) || is.character(data[[cluster_col]])
+  if (!is_categorical) {
+    data[[cluster_col]] <- as.factor(data[[cluster_col]])
+  }
+  
+  num_data <- data %>%
+    select(where(is.numeric), all_of(cluster_col))
+  
+  df_long <- num_data %>%
+    pivot_longer(cols = -all_of(cluster_col), names_to = "Variable", values_to = "Value")
+  
+  # <<< Add custom order here
+  df_long$Variable <- factor(df_long$Variable,
+                             levels = c("Rinput", 
+                                        "Tau" , 
+                                        "I thres.", 
+                                        "AP HW" , 
+                                        "Max. dep.", 
+                                        "Max. rep ",
+                                        "AP amp" ,
+                                        "AP thres.",
+                                        "RMP" ,
+                                        "Sag" 
+                             ))
+  
+  num_levels <- length(unique(data[[cluster_col]]))
+  custom_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(num_levels)
+  
+  custom_colors <- scale_fill_manual(
+    values = custom_palette, 
+    guide = if (legend) guide_legend(override.aes = list(size = 3)) else "none"
+  )  
+  
+  center_fun <- if (center_line == "mean") mean else median
+  
+  stat_results <- df_long %>%
+    group_by(Variable) %>%
+    group_modify(~{
+      group_vals <- split(.x$Value, .x[[cluster_col]])
+      normality_results <- sapply(group_vals, function(v) {
+        if (length(v) >= 3) shapiro.test(v)$p.value > 0.05 else TRUE
+      })
+      all_normal <- all(normality_results)
+      
+      formula <- reformulate(cluster_col, response = "Value")
+      
+      if (all_normal) {
+        test <- aov(formula, data = .x)
+        p <- summary(test)[[1]][["Pr(>F)"]][1]
+        method <- "ANOVA"
+        posthoc <- if (p < 0.05) {
+          tukey <- TukeyHSD(test)
+          as.data.frame(tukey[[1]]) %>%
+            mutate(Comparison = rownames(.)) %>%
+            select(Comparison, adj.p.value = `p adj`)
+        } else {
+          NULL
+        }
+      } else {
+        test <- kruskal.test(formula, data = .x)
+        p <- test$p.value
+        method <- "Kruskal-Wallis"
+        posthoc <- if (p < 0.05) {
+          pairwise <- pairwise.wilcox.test(.x$Value, .x[[cluster_col]], p.adjust.method = "BH")
+          result_df <- as.data.frame(as.table(pairwise$p.value))
+          colnames(result_df) <- c("Group1", "Group2", "adj.p.value")
+          result_df <- result_df[!is.na(result_df$adj.p.value), ]
+          result_df$Comparison <- paste(result_df$Group1, result_df$Group2, sep = " vs ")
+          result_df[, c("Comparison", "adj.p.value")]
+        } else {
+          NULL
+        }
+      }
+      
+      tibble(Method = method, P.Value = p, PostHoc = list(posthoc))
+    }) %>% ungroup()
+  
+  
+  # Plotting
+  if (!separate) {
+    plot <- ggplot(df_long, aes(x = .data[[cluster_col]], y = Value, fill = .data[[cluster_col]])) +
+      geom_violin(trim = FALSE, alpha = 0.7, width = 0.4) +
+      stat_summary(fun = center_fun, geom = "crossbar", width = 0.3, color = "black", linewidth = 0.2) +
+      geom_jitter(width = 0.05, alpha = 0.4, shape = 21, color = "black") +
+      facet_wrap(~Variable, nrow = 2, scales = "free_y", labeller = label_value) +
+      custom_colors +
+      theme_minimal() +
+      theme(
+        panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank(),
+        axis.line = element_line(color = "black", linewidth = 0.5),
+        legend.position = if (legend) "right" else "none"
+      ) +
+      labs(x = cluster_col, y = NULL, fill = cluster_col)
+    
+    print(plot)
+    return(list(plot = plot, stats = stat_results))
+    
+  } else {
+    plots <- df_long %>%
+      split(.$Variable) %>%
+      lapply(function(sub_data) {
+        ggplot(sub_data, aes(x = .data[[cluster_col]], y = Value, fill = .data[[cluster_col]])) +
+          geom_violin(trim = FALSE, alpha = 0.7) +
+          stat_summary(fun = center_fun, geom = "crossbar", width = 0.3, color = "black", linewidth = 0.2) +
+          geom_jitter(width = 0.05, alpha = 0.4, shape = 21, color = "black", fill = "black") +
+          custom_colors +
+          theme_minimal() +
+          theme(
+            panel.grid.major = element_blank(),
+            panel.grid.minor = element_blank(),
+            axis.line = element_line(color = "black", linewidth = 0.5),
+            legend.position = if (legend) "right" else "none"
+          ) +
+          labs(x = cluster_col, y = unique(sub_data$Variable), fill = cluster_col)
+      })
+    
+    for (p in plots) print(p)
+    return(list(plots = plots, stats = stat_results))
+  }
+}
+
 
 split_violin_by_group <- function(data,
                                   main_group,
@@ -1925,7 +2055,7 @@ kmeans_plotly_age2 <- function(data,
   
   # Define color mapping for Age categories (instead of Clusters)
   unique_ages <- sort(unique(data$Age))
-  age_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
+  age_palette <- colorRampPalette(c("gray25","gray40","gray55","gray70","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
   cluster_color_map <- setNames(age_palette, unique_ages)
   
   # Debugging: Print the Age-Color mapping
@@ -1940,7 +2070,7 @@ kmeans_plotly_age2 <- function(data,
     pca_data$Color <- as.factor(data[[color_by]]) 
     
     unique_colors <- unique(data[[color_by]])
-    point_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
+    point_palette <- colorRampPalette(c("gray70","gray50","gray35","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
     point_color_map <- setNames(point_palette, sort(unique(unique_colors)))
   } else {
     pca_data$Color <- pca_data$Cluster
@@ -1998,7 +2128,7 @@ kmeans_plotly_age2 <- function(data,
           size = 6,
           color = point_color_map[[as.character(row$Color)]],
           symbol = symbol_to_use,
-          opacity = 0.5
+          opacity = 0.0005
         )
       )
   }

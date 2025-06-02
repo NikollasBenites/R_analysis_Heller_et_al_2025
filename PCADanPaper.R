@@ -42,7 +42,10 @@ if(1){
   filename = "TeNT_Ephys.csv"
   danPCscores = "PCA_Scores_Clusters.csv"
   projected_data = "P4_P6_project_P9.csv"
-  
+  data_contra = "Combined_projection_PC1to3.csv"
+  data_contra_features = "PCA_cMNTB_projection_kmeans.csv"
+  data_contra_vp = "data_contra_vp.csv"
+  data_P0 = "Combined_projection_PC1to3_v2.csv"
 }
 
 # Data input and transformations ------------------------------------------
@@ -50,10 +53,14 @@ if(1){
   df = load_data(filename,make_id = FALSE)
   pc_scores_dan = load_data(danPCscores,make_id = F)
   project_data = load_data(projected_data,make_id = F)
+  data_contra = load_data(data_contra, make_id = F)
+  data_contra_vp = load_data(data_contra_vp, make_id = F)
+  data_contra_features = load_data(data_contra_features, make_id = F)
+  data_contra2 = load_data(data_P0, make_id = F)
 }
 
 # Filtering only non categorical variables --------------------------------
-if (1) {
+if(1) {
   m = as.data.frame(df %>% select(
     !c(
       "Cell_ID",
@@ -303,7 +310,7 @@ if(0) {
 }
 
 # GRAPHICS: Scree plot -------------------------------------------------------------
-if (0) {
+if(0) {
   p2 = plot_pca_scree(
     res.pca,
     bar_fill = "grey30",
@@ -426,8 +433,8 @@ print(p3d)
 
 
 # violin plots projected data -------
-if (0) {
-  pd = project_data_clusterInverted %>% select(
+if(0) {
+  pd = project_data %>% select(
   !c(
     "Dim.1",
     "Dim.2",
@@ -442,17 +449,17 @@ if (0) {
   )
 )
 
-plots = vp_by_var(pd,cluster_col = "Cluster",center_line = "mean",separate = T,legend = F)
+plots = vp_by_var(m_pc,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
 
-square_plots = lapply(plots, function(p) p + theme())
-
-# Arrange in a 2 rows × 5 columns layout
-layout_2x5 <- wrap_plots(square_plots) + plot_layout(ncol = 5, nrow = 2)
-
-# Arrange in a 5 rows × 2 columns layout
-layout_5x2 <- wrap_plots(square_plots) + plot_layout(ncol = 2, nrow = 5)
-print(layout_2x5)
-print(layout_5x2)
+# square_plots = lapply(plots, function(p) p + theme())
+# 
+# # Arrange in a 2 rows × 5 columns layout
+# layout_2x5 <- wrap_plots(square_plots) + plot_layout(ncol = 5, nrow = 2)
+# 
+# # Arrange in a 5 rows × 2 columns layout
+# layout_5x2 <- wrap_plots(square_plots) + plot_layout(ncol = 2, nrow = 5)
+# print(layout_2x5)
+# print(layout_5x2)
 }
 
 # projections "mother of data"-----
@@ -484,11 +491,11 @@ if(0){
   dataset_names = c("P6 iMNTB","P4 iMNTB")
   projected_results = multi_pca_projection_factominer(control_data,new_datasets,dataset_names)
   
-  #plot_pca_projection_factominer(projected_results)
+  plot_pca_projection_factominer(projected_results)
   
 }
 
-# K means in the projections "mother of data" --------
+# K means in the projections "mother of data" -------- ( DO NOT FORGET TO 'ACTIVATE THE PRJECTIONS BEFORE')
 if(1){
   data_f = rbind(P4_iMNTB%>%select(!c("ID")),
                  P4_TeNT%>%select(!c("ID")),
@@ -514,7 +521,9 @@ if(1){
                               ))
   pc_scores_f_3d = merge_col(pc_scores_f_3d[,1:3],data_f,merge_col = "Firing Pattern")
   pc_scores_f_id_3d = merge_col(pc_scores_f_3d,data_id,merge_col = "ID")
-  if(0){result = kmeans_analysis(
+}
+  if(0){
+    result = kmeans_analysis(
     pc_scores_f_3d,
     scale_data = FALSE,
     pca = FALSE,
@@ -522,15 +531,12 @@ if(1){
     auto_select = F,
     symbol_by = "Firing Pattern",
     symbol_values = c(19, 15))
-  m_pc = merge_col(data_f,result$clustered_data, merge_col = "Cluster")
-  p = vp_by_var(m_pc,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
+    m_pc = merge_col(data_f,result$clustered_data, merge_col = "Cluster")
+    p = vp_by_var(m_pc,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
   }
-   
-  }
-
-
+ 
 # K means in the projections into P9i -------
-if(0){
+if(1){
   data_f = rbind(P9_iMNTB%>%select(!c("ID")),
                  P6_iMNTB%>%select(!c("ID")),
                  P4_iMNTB%>%select(!c("ID")))
@@ -550,6 +556,7 @@ if(0){
   ))
   pc_scores_f = merge_col(pc_scores_f[,1:2],data_f,merge_col = "Firing Pattern")
   pc_scores_f_id = merge_col(pc_scores_f,data_id,merge_col = "ID")
+  
   if(0){result = kmeans_analysis(
     pc_scores_f,
     scale_data = FALSE,
@@ -560,7 +567,7 @@ if(0){
     symbol_values = c(19, 15)
   )
   m_pc = merge_col(data_f,result$clustered_data, merge_col = "Cluster")
-  p = vp_by_var(m_pc,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
+  p = vp_by_var_stats(m_pc,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
   }
 }
 
@@ -583,8 +590,14 @@ if(0){
     auto_select = F,
     grid = "cube"
     )
-  # m_3d_c = merge_col(data_f,result_3D_kmeans_clusters$clustered_data, merge_col = "Cluster")
-  # p = vp_by_var(m_3d_c,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
+  m_3d_c = merge_col(data_f,result_3D_kmeans_clusters$clustered_data, merge_col = "Cluster")
+  m_3d_c = m_3d_c %>% mutate(Cluster = case_when(
+    Cluster == 1 ~ 3,
+    Cluster == 2 ~ 2,
+    Cluster == 3 ~ 1
+    ))
+  p = vp_by_var_stats(m_3d_c,cluster_col = "Cluster",center_line = "mean",separate = F,legend = F)
+  print((nrow(m_3d_c)))
 }
 
 if(1){  
@@ -608,4 +621,45 @@ if(1){
   p = vp_by_var(m_3d_a,cluster_col = "Age",center_line = "mean",separate = F,legend = F)}
 }
 
+#Results to contra side -------
+if(1){
+  data_contra = data_contra %>%
+    mutate(Age = sub("_(iMNTB|TeNT|NonInjected)","",ID),
+           Group= sub(".*_","",ID))
+  result_3D_data_contra = kmeans_plotly_age2(
+    data_contra,
+    symbol_by = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by = "Age",
+    scale_data = FALSE,
+    pca = FALSE,
+    nstart = 25,
+    auto_select = F,
+    grid = "cube"
+  )
+  data_contra_vp = data_contra_vp %>% mutate(Cluster = case_when(
+    Cluster == 1 ~ 3,
+    Cluster == 2 ~ 1,
+    Cluster == 3 ~ 2
+  ))
+ if(1){
+  vp_contra = vp_by_var_stats(data_contra_vp, cluster_col = "Cluster",center_line = "mean",legend = FALSE)
+ }
+}
 
+#Results contra side with P0 ------
+if(1){
+  data_contra2 = data_contra2 %>%
+    mutate(Age = sub("_(iMNTB|TeNT|NonInjected)","",ID),
+           Group= sub(".*_","",ID))
+  result_3D_data_contra = kmeans_plotly_age2(
+    data_contra2,
+    symbol_by = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by = "Age",
+    scale_data = FALSE,
+    pca = FALSE,
+    nstart = 25,
+    auto_select = F,
+    grid = "cube"
+  )}
