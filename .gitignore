@@ -9,10 +9,7 @@
 .html
 .tif
 
-/parameter_plots/
-/PCA_summary_files/
-/USF_2025_symposium/
-/vp_P4_P6c_project_P9i
+/in_progress
 
 # Logs / temporary files / files
 *.log
