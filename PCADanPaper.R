@@ -45,7 +45,7 @@ if(1){
   data_contra = "Combined_projection_PC1to3.csv"
   data_contra_features = "PCA_cMNTB_projection_kmeans.csv"
   data_contra_vp = "data_contra_vp.csv"
-  data_P0 = "Combined_projection_PC1to3_v2.csv"
+  data_P0 = "Combined_projection_PC1to3_v4.csv"
 }
 
 # Data input and transformations ------------------------------------------
@@ -652,6 +652,8 @@ if(1){
   data_contra2 = data_contra2 %>%
     mutate(Age = sub("_(iMNTB|TeNT|NonInjected)","",ID),
            Group= sub(".*_","",ID))
+
+  
   result_3D_data_contra = kmeans_plotly_age2(
     data_contra2,
     symbol_by = "Firing Pattern",
@@ -663,3 +665,6 @@ if(1){
     auto_select = F,
     grid = "cube"
   )}
+if(1){
+  vp_contra = vp_by_var_stats(data_contra_vp, cluster_col = "Cluster",center_line = "mean",legend = FALSE)
+}
