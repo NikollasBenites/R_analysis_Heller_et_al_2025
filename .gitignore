@@ -1,13 +1,13 @@
-.Rproj.user
-.Rhistory
-.RData
-.Ruserdata
-.csv
-.pdf
-.png
-.ai
-.html
-.tif
+*.Rproj.user
+*.Rhistory
+*.RData
+*.Ruserdata
+*.csv
+*.pdf
+*.png
+*.ai
+*.html
+*.tif
 
 /in_progress
 
