@@ -36,37 +36,44 @@ if(1){
   conflicted::conflict_prefer("select", "dplyr")
   conflicted::conflict_prefer("layout", "plotly")
   
-  this_file <- normalizePath(sys.frames()[[1]]$ofile) #just works when source the file
-  script_dir <- dirname(this_file)
-  cat("Script directory:", script_dir, "\n")
-  setwd(script_dir)
+  # this_file <- normalizePath(sys.frames()[[1]]$ofile) #just works when source the file
+  # script_dir <- dirname(this_file)
+  # cat("Script directory:", script_dir, "\n")
+  # setwd(script_dir)
   
   source("myFun.R")
   
   #source("PCA_transformation_factomineR_v4.R")
   #source("PCA_transformation_factomineR_v3.R")
-  filename = "TeNT_Ephys.csv"
+  filename = "TeNT_Ephys_v2.csv"
   danPCscores = "PCA_Scores_Clusters.csv"
   projected_data = "P4_P6_project_P9.csv"
-  data_contra = "Combined_projection_PC1to3.csv"
-  data_contra_features = "PCA_cMNTB_projection_kmeans.csv"
+  data_contra = "Combined_projection_latency.csv"
+  #data_contra_features = "PCA_cMNTB_projection_kmeans.csv"
   data_contra_vp = "data_contra_vp.csv"
-  data_P0 = "Combined_projection_PC1to3_v4.csv"
+  data_P0 = "Combined_projection_latency.csv"
 }
 
 # Data input and transformations ------------------------------------------
 if(1){
   df = load_data(filename,make_id = FALSE)
+  if ("Latency" %in% colnames(df)) {
+    df <- df[!is.na(df$Latency) & !is.nan(df$Latency), ]
+  }
+  
+  #df = df_filtered
   pc_scores_dan = load_data(danPCscores,make_id = F)
   project_data = load_data(projected_data,make_id = F)
   data_contra = load_data(data_contra, make_id = F)
   data_contra_vp = load_data(data_contra_vp, make_id = F)
-  data_contra_features = load_data(data_contra_features, make_id = F)
+  #data_contra_features = load_data(data_contra_features, make_id = F)
   data_contra2 = load_data(data_P0, make_id = F)
 }
 
 # Filtering only non categorical variables --------------------------------
 if(1) {
+  
+    
   m = as.data.frame(df %>% select(
     !c(
       "Cell_ID",
@@ -92,6 +99,7 @@ if(1) {
       "Depol_Block"
     )
   )) 
+  if("Latency" %in% colnames(df)){
   colnames(m) = c(
     "Rinput",
     "Tau",
@@ -102,7 +110,8 @@ if(1) {
     "AP thres.",
     "Max. dep.",
     "Max. rep ",
-    "Sag"
+    "Sag",
+    "Latency"
   )
   colnames(m_ID) = c(
     "ID",
@@ -115,7 +124,8 @@ if(1) {
     "AP thres.",
     "Max. dep.",
     "Max. rep ",
-    "Sag"
+    "Sag",
+    "Latency"
   )
   colnames(m_firing) = c(
     "ID",
@@ -129,8 +139,49 @@ if(1) {
     "AP thres.",
     "Max. dep.",
     "Max. rep ",
-    "Sag"
-  )
+    "Sag",
+    "Latency"
+  )}else{
+    colnames(m) = c(
+      "Rinput",
+      "Tau",
+      "RMP",
+      "I thres.",
+      "AP amp",
+      "AP HW",
+      "AP thres.",
+      "Max. dep.",
+      "Max. rep ",
+      "Sag"
+    )
+    colnames(m_ID) = c(
+      "ID",
+      "Rinput",
+      "Tau",
+      "RMP",
+      "I thres.",
+      "AP amp",
+      "AP HW",
+      "AP thres.",
+      "Max. dep.",
+      "Max. rep ",
+      "Sag"
+    )
+    colnames(m_firing) = c(
+      "ID",
+      "Firing Pattern",
+      "Rinput",
+      "Tau",
+      "RMP",
+      "I thres.",
+      "AP amp",
+      "AP HW",
+      "AP thres.",
+      "Max. dep.",
+      "Max. rep ",
+      "Sag")
+  }
+  
 
   ages <- c("P4", "P6", "P9","P14")
   

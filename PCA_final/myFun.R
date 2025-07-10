@@ -2055,7 +2055,8 @@ kmeans_plotly_age2 <- function(data,
   
   # Define color mapping for Age categories (instead of Clusters)
   unique_ages <- sort(unique(data$Age))
-  age_palette <- colorRampPalette(c("gray25","gray40","gray55","gray70","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
+  #age_palette <- colorRampPalette(c("gray25","gray40","gray55","gray70","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
+  age_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
   cluster_color_map <- setNames(age_palette, unique_ages)
   
   # Debugging: Print the Age-Color mapping
@@ -2070,7 +2071,8 @@ kmeans_plotly_age2 <- function(data,
     pca_data$Color <- as.factor(data[[color_by]]) 
     
     unique_colors <- unique(data[[color_by]])
-    point_palette <- colorRampPalette(c("gray70","gray50","gray35","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
+    #point_palette <- colorRampPalette(c("gray70","gray50","gray35","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
+    point_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
     point_color_map <- setNames(point_palette, sort(unique(unique_colors)))
   } else {
     pca_data$Color <- pca_data$Cluster
