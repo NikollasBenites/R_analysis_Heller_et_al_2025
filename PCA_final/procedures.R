@@ -35,23 +35,23 @@ if(1){
   
   conflicted::conflict_prefer("select", "dplyr")
   conflicted::conflict_prefer("layout", "plotly")
-  
-  # this_file <- normalizePath(sys.frames()[[1]]$ofile) #just works when source the file
-  # script_dir <- dirname(this_file)
-  # cat("Script directory:", script_dir, "\n")
-  # setwd(script_dir)
-  
+  # 
+  this_file <- normalizePath(sys.frames()[[1]]$ofile) #just works when source the file
+  script_dir <- dirname(this_file)
+  cat("Script directory:", script_dir, "\n")
+  setwd(script_dir)
+
   source("myFun.R")
   
   #source("PCA_transformation_factomineR_v4.R")
   #source("PCA_transformation_factomineR_v3.R")
-  filename = "TeNT_Ephys_v2.csv"
+  filename = "TeNT_Ephys_latency.csv"
   danPCscores = "PCA_Scores_Clusters.csv"
   projected_data = "P4_P6_project_P9.csv"
-  data_contra = "Combined_projection_latency.csv"
+  data_contra = "Combined_projection_all_v2.csv"
   #data_contra_features = "PCA_cMNTB_projection_kmeans.csv"
   data_contra_vp = "data_contra_vp.csv"
-  data_P0 = "Combined_projection_latency.csv"
+  data_P0 = "Combined_projection_all_v2.csv"
 }
 
 # Data input and transformations ------------------------------------------
@@ -73,7 +73,6 @@ if(1){
 # Filtering only non categorical variables --------------------------------
 if(1) {
   
-    
   m = as.data.frame(df %>% select(
     !c(
       "Cell_ID",
@@ -700,7 +699,8 @@ if(1){
     Cluster == 3 ~ 2
   ))
  if(1){
-  vp_contra = vp_by_var_stats(data_contra_vp, cluster_col = "Cluster",center_line = "mean",legend = FALSE)
+  vp_imntb = vp_by_var_stats(iMNTB_vp, cluster_col = "Cluster",separate = FALSE,center_line = "mean",legend = FALSE)
+  vp_tent = vp_by_var_stats(tent_vp, cluster_col = "Cluster",separate = FALSE,center_line = "mean",legend = FALSE)
  }
 }
 
@@ -711,7 +711,7 @@ if(1){
            Group= sub(".*_","",ID))
 
   
-  result_3D_data_contra = kmeans_plotly_age2(
+  closest_centroids_cells = kmeans_plotly_age3(
     data_contra2,
     symbol_by = "Firing Pattern",
     symbol_by_group = "Group",
@@ -720,8 +720,10 @@ if(1){
     pca = FALSE,
     nstart = 25,
     auto_select = F,
-    grid = "cube"
+    grid = "cube",
+    distance_method = "mahalanobis",
+    top_n = 5
   )}
-if(1){
+if(0){
   vp_contra = vp_by_var_stats(data_contra_vp, cluster_col = "Cluster",center_line = "mean",legend = FALSE)
 }

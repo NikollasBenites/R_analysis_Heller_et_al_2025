@@ -684,7 +684,8 @@ vp_by_var <- function(data, cluster_col, separate = FALSE, center_line = NULL, l
                                         "AP amp" ,
                                         "AP thres.",
                                         "RMP" ,
-                                        "Sag" 
+                                        "Sag",
+                                        "Latency"
                                         ))
   
   num_levels <- length(unique(data[[cluster_col]]))
@@ -765,14 +766,15 @@ vp_by_var_stats <- function(data, cluster_col, separate = FALSE, center_line = N
   df_long$Variable <- factor(df_long$Variable,
                              levels = c("Rinput", 
                                         "Tau" , 
-                                        "I thres.", 
+                                        "I thres.",
+                                        "RMP" ,
+                                        "Sag",
+                                        "Latency",
                                         "AP HW" , 
-                                        "Max. dep.", 
-                                        "Max. rep ",
                                         "AP amp" ,
                                         "AP thres.",
-                                        "RMP" ,
-                                        "Sag" 
+                                        "Max. dep.", 
+                                        "Max. rep "
                              ))
   
   num_levels <- length(unique(data[[cluster_col]]))
@@ -2051,12 +2053,13 @@ kmeans_plotly_age2 <- function(data,
   pca_data$Group <- as.character(data$Group)
   
   # Define symbol mapping for firing pattern
+  
   default_symbol_map <- c("Phasic" = "circle", "Tonic" = "square")
   
   # Define color mapping for Age categories (instead of Clusters)
   unique_ages <- sort(unique(data$Age))
-  #age_palette <- colorRampPalette(c("gray25","gray40","gray55","gray70","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
-  age_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
+  age_palette <- colorRampPalette(c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
+  #age_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
   cluster_color_map <- setNames(age_palette, unique_ages)
   
   # Debugging: Print the Age-Color mapping
@@ -2071,15 +2074,14 @@ kmeans_plotly_age2 <- function(data,
     pca_data$Color <- as.factor(data[[color_by]]) 
     
     unique_colors <- unique(data[[color_by]])
-    #point_palette <- colorRampPalette(c("gray70","gray50","gray35","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
-    point_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
+    point_palette <- colorRampPalette(c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
+    #point_palette <- colorRampPalette(c("#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
     point_color_map <- setNames(point_palette, sort(unique(unique_colors)))
   } else {
     pca_data$Color <- pca_data$Cluster
     point_color_map <- cluster_color_map
   }
-  
-  # Function to generate ellipsoid points for a given cluster
+  # Function to generate ellipsoid points for a given cluster 
   generate_ellipsoid <- function(center, cov_matrix, num_points = 60) {
     phi <- seq(0, 2 * pi, length.out = num_points)
     theta <- seq(0, pi, length.out = num_points)
@@ -2105,7 +2107,7 @@ kmeans_plotly_age2 <- function(data,
     )
   }
   
-  # Create 3D scatter plot using Plotly
+  # Create 3D scatter plot using Plotly ----
   plot <- plot_ly()
   
   # Iterate over each data point and assign symbols based on conditions
@@ -2243,6 +2245,9 @@ kmeans_plotly_age2 <- function(data,
   return(list(kmeans_result = kmeans_result, pca_data = pca_data))
 }
 
+
+
+#The function bellow calculate the closest value to the centroids of each age or cluster
 kmeans_plotly_age3 <- function(data,
                                symbol_by = NULL,
                                symbol_by_group = NULL,
@@ -2253,11 +2258,17 @@ kmeans_plotly_age3 <- function(data,
                                seed = 123,
                                scale_data = TRUE,
                                nstart = 25,
-                               grid = TRUE) {
+                               grid = TRUE,
+                               distance_method = c("euclidean", "mahalanobis"),
+                               top_n = 5,
+                               md_eps = 1e-6) {
   library(dplyr)
   library(plotly)
   library(RColorBrewer)
   library(ggplot2)
+  
+  distance_method <- match.arg(distance_method)
+  stopifnot(top_n >= 1)
   
   set.seed(seed)
   data <- as.data.frame(data)
@@ -2289,7 +2300,6 @@ kmeans_plotly_age3 <- function(data,
     pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
     pca_data <- as.data.frame(pca_result$x)
     pca_data$CellID <- as.character(data$'Cell ID')
-    
     colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
   } else {
     pca_data <- as.data.frame(scaled_data)
@@ -2306,11 +2316,8 @@ kmeans_plotly_age3 <- function(data,
   
   # Color map based on Age
   unique_ages <- sort(unique(data$Age))
-  age_palette <- colorRampPalette(c("#EEAD0E","gray25","gray40","gray55","gray70","#B23AEE", "#00B2EE"))(length(unique_ages))
+  age_palette <- colorRampPalette(c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_ages))
   cluster_color_map <- setNames(age_palette, unique_ages)
-  
-  print("Cluster Color Map:")
-  print(cluster_color_map)
   
   if (!is.null(color_by)) {
     if (!(color_by %in% colnames(data))) {
@@ -2318,67 +2325,75 @@ kmeans_plotly_age3 <- function(data,
     }
     pca_data$Color <- as.factor(data[[color_by]]) 
     unique_colors <- unique(data[[color_by]])
-    point_palette <- colorRampPalette(c("#EEAD0E","gray70","gray50","gray35","#B23AEE", "#00B2EE"))(length(unique_colors))
+    point_palette <- colorRampPalette(c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E"))(length(unique_colors))
     point_color_map <- setNames(point_palette, sort(unique(unique_colors)))
   } else {
     pca_data$Color <- pca_data$Cluster
     point_color_map <- cluster_color_map
   }
   
-  # Ellipsoid generator
+  # Ellipsoid generator ----
   generate_ellipsoid <- function(center, cov_matrix, num_points = 60) {
     phi <- seq(0, 2 * pi, length.out = num_points)
     theta <- seq(0, pi, length.out = num_points)
+    
     x <- outer(sin(theta), cos(phi))
     y <- outer(sin(theta), sin(phi))
     z <- outer(cos(theta), rep(1, length(phi)))
+  
     sphere_points <- cbind(as.vector(x), as.vector(y), as.vector(z))
+    
     eig <- eigen(cov_matrix)
-    scaling_factor = 0.2
-    transformation <- eig$vectors %*% diag(sqrt(abs(eig$values))) * scaling_factor
-    ellipsoid_points <- t(apply(sphere_points, 1, function(p) drop(transformation %*% p) + center))
-    list(
+    scaling_factor <- 0.2
+    transformation <- eig$vectors %*% diag(sqrt(abs(eig$values)) * scaling_factor)
+    
+    ellipsoid_points <- t(apply(sphere_points, 1, function(p) {
+      drop(transformation %*% p) + center
+      }))
+   
+     list(
       x = matrix(ellipsoid_points[, 1], nrow = num_points),
       y = matrix(ellipsoid_points[, 3], nrow = num_points),
       z = matrix(ellipsoid_points[, 2], nrow = num_points)
     )
   }
-  
+  # Create 3D scatter plot using Plotly ----
   plot <- plot_ly()
+  # Iterate over each data point and assign symbols based on conditions
+  # for (index in 1:nrow(pca_data)) {
+  #   row <- pca_data[index, ]
+  # 
+  #   # Default symbol from `default_symbol_map`
+  #   symbol_to_use <- default_symbol_map[[as.character(row[[symbol_by]])]]
+  # 
+  #   # If the group is TeNT, use open symbols
+  #   if (!is.null(symbol_by_group) && row[[symbol_by_group]] == "TeNT") {
+  #     symbol_to_use <- paste0(symbol_to_use, "-open")
+  #   }
+  # 
+  #   # Add point to the plot
+  #   plot <- plot %>%
+  #     add_trace(
+  #       data = pca_data,
+  #       x = row$PC1, y = row$PC3, z = row$PC2,
+  #       type = "scatter3d",
+  #       mode = "markers",
+  #       text = paste0("ID: ", pca_data$CellID,
+  #                      "<br>Age: ", pca_data$Age,
+  #                      "<br>Group: ", pca_data$Group),
+  #       hoverinfo = "text",
+  #       marker = list(
+  #         size = 6,
+  #         color = point_color_map[[as.character(row$Color)]],
+  #         symbol = symbol_to_use,
+  #         opacity = 0.3
+  #       ),
+  #       name = "Cells",
+  #       showlegend = FALSE
+  #     )
+  # }
   
   
-  # Add data points
-  print(table(pca_data$Top5Highlight))
-  for (index in 1:nrow(pca_data)) {
-    row <- pca_data[index, ]
-    highlight <- isTRUE(row[["Top5Highlight"]])
-    symbol_to_use <- default_symbol_map[[as.character(row[[symbol_by]])]]
-    
-    if (!is.null(symbol_by_group) && row[[symbol_by_group]] == "TeNT") {
-      symbol_to_use <- paste0(symbol_to_use, "-open")
-    }
-    
-    plot <- plot %>%
-      add_trace(
-        x = row$PC1, y = row$PC3, z = row$PC2,
-        type = "scatter3d", mode = "markers",
-        text = paste0(
-          "ID: ", row$CellID,
-          "<br>Age: ", row$Age,
-          "<br>Group: ", row$Group
-        ),
-        hoverinfo = "text",
-        marker = list(
-          size = if (highlight) 12 else 6,
-          color = if (highlight) "red" else point_color_map[[as.character(row$Color)]],
-          symbol = if (highlight) "star" else symbol_to_use,
-          opacity = if (highlight) 1.0 else 0.8
-        )
-      )
-  }
-  
-  
-  # Ellipsoids by Age × Group
   min_z <- min(pca_data$PC2)
   age_group_combinations <- unique(data[, c("Age", "Group")])
   ellipsoid_stats <- data.frame(
@@ -2392,25 +2407,51 @@ kmeans_plotly_age3 <- function(data,
   top5_closest <- list()
   centroid_coords <- data.frame(
     Age = character(),
-    Group = character(),  # or remove this if not using group
+    Group = character(),
     PC1 = numeric(),
     PC2 = numeric(),
     PC3 = numeric(),
     stringsAsFactors = FALSE
   )
   
-  pca_data$DistanceToCentroid <- NA
+  pca_data$DistanceToCentroid <- NA_real_
   
+  # helper: compute distances by chosen method
+  compute_distances <- function(X, center_vec, cov_mat = NULL) {
+    if (distance_method == "euclidean") {
+      dif <- sweep(X, 2, center_vec, "-")
+      return(sqrt(rowSums(dif^2)))
+    } else {
+      # Mahalanobis: regularize cov if needed
+      if (is.null(cov_mat)) stop("cov_mat is required for Mahalanobis")
+      # try chol; if fails, add ridge
+      cov_try <- cov_mat
+      ok <- FALSE
+      for (ridge in c(0, md_eps, 10*md_eps, 100*md_eps)) {
+        cov_try <- cov_mat + diag(ridge, ncol(cov_mat))
+        if (all(is.finite(cov_try)) && isTRUE(all.equal(cov_try, t(cov_try)))) {
+          chol_ok <- tryCatch({ chol(cov_try); TRUE }, error = function(e) FALSE)
+          if (chol_ok) { ok <- TRUE; break }
+        }
+      }
+      if (!ok) {
+        warning("Covariance not PD even after regularization; falling back to Euclidean distances.")
+        dif <- sweep(X, 2, center_vec, "-")
+        return(sqrt(rowSums(dif^2)))
+      }
+      return(mahalanobis(X, center = center_vec, cov = cov_try))
+    }
+  }
   
   for (row in 1:nrow(age_group_combinations)) {
     current_age <- age_group_combinations[row, "Age"]
     current_group <- age_group_combinations[row, "Group"]
-    subset_points <- pca_data %>% dplyr::filter(Age == current_age & Group == current_group) %>% select(PC1, PC2, PC3)
+    subset_points <- pca_data %>%
+      dplyr::filter(Age == current_age & Group == current_group) %>%
+      select(PC1, PC2, PC3)
     
     if (nrow(subset_points) > 2) {
       center <- colMeans(subset_points)
-      print(names(center))  # Should show: "PC1" "PC2" "PC3"
-      
       centroid_coords <- rbind(centroid_coords, data.frame(
         Age = current_age,
         Group = current_group,
@@ -2424,129 +2465,92 @@ kmeans_plotly_age3 <- function(data,
       
       # Filter cells only from current Age × Group
       group_cells <- pca_data %>%
-        filter(Age == current_age & Group == current_group)
+        dplyr::filter(Age == current_age & Group == current_group)
       
       if (nrow(group_cells) > 2) {
-        center <- colMeans(group_cells[, c("PC1", "PC2", "PC3")])
-        cov_matrix <- cov(group_cells[, c("PC1", "PC2", "PC3")])
-        
-        #Compute Mahalanobis distance for each point in the group
-        # distances <- mahalanobis(
-        #   x = group_cells[, c("PC1", "PC2", "PC3")],
-        #   center = center,
-        #   cov = cov_matrix
-        # )
-        
-        #Euclidian
+        center_vec <- as.numeric(center)
         coords <- as.matrix(group_cells[, c("PC1", "PC2", "PC3")])
-        center_vec <- as.numeric(center)  # drop names, keep order
-        distances <- sqrt(rowSums((coords - matrix(center_vec, nrow = nrow(coords), ncol = 3, byrow = TRUE))^2))
         
+        distances <- compute_distances(
+          X = coords,
+          center_vec = center_vec,
+          cov_mat = if (distance_method == "mahalanobis") cov(coords) else NULL
+        )
+        
+        # Save back
         matching_idx <- match(group_cells$CellID, pca_data$CellID)
         pca_data$DistanceToCentroid[matching_idx] <- distances
         
-        
-        # Sort by distance and get top 5 closest cells
-        top5 <- group_cells %>%
+        # Sort by distance and get top_n closest cells
+        n_take <- min(top_n, nrow(group_cells))
+        topk <- group_cells %>%
           mutate(Distance = distances) %>%
           arrange(Distance) %>%
-          slice(1:5) %>%
+          slice(1:n_take) %>%
           select(CellID, Distance)
-        # Ensure both CellID sets are character and clean
-        top5$CellID <- as.character(top5$CellID)
-        pca_data$CellID <- as.character(pca_data$CellID)
-        top5$CellID <- trimws(top5$CellID)
-        pca_data$CellID <- trimws(pca_data$CellID)
         
-        # Mark them in the full PCA data
-        pca_data$Top5Highlight[pca_data$CellID %in% top5$CellID] <- TRUE
-        cat("Highlighted cells:\n")
-        print(intersect(pca_data$CellID, top5$CellID))
-        print(table(pca_data$Top5Highlight))
+        # Highlight
+        pca_data$Top5Highlight[pca_data$CellID %in% as.character(topk$CellID)] <- TRUE
         
-        # Print or store
-        cat(paste0("\nTop 5 closest to centroid for ", current_age, "_", current_group, ":\n"))
-        print(top5)
+        # Store list
+        top5_closest[[paste0(current_age, "_", current_group)]] <- topk
         
-        # Optional: Save to a list
-        top5_closest[[paste0(current_age, "_", current_group)]] <- top5
-        # === Draw lines from top 5 to centroid ===
-        for (i in 1:nrow(top5)) {
-          cell_id <- top5$CellID[i]
-          
+        # Draw lines from top_k to centroid
+        for (i in seq_len(nrow(topk))) {
+          cell_id <- topk$CellID[i]
           cell_coords <- pca_data[pca_data$CellID == cell_id, c("PC1", "PC2", "PC3")]
           centroid_coords_mat <- as.data.frame(t(center))
           
           plot <- plot %>%
             add_trace(
               x = c(cell_coords$PC1, centroid_coords_mat[1, "PC1"]),
-              y = c(cell_coords$PC3, centroid_coords_mat[1, "PC3"]),  # note PC3 on y-axis
-              z = c(cell_coords$PC2, centroid_coords_mat[1, "PC2"]),  # note PC2 on z-axis
+              y = c(cell_coords$PC3, centroid_coords_mat[1, "PC3"]),
+              z = c(cell_coords$PC2, centroid_coords_mat[1, "PC2"]),
               type = "scatter3d",
               mode = "lines",
               line = list(color = "black", width = 3),
               showlegend = FALSE
             )
         }
-        
       }
       
-      
-      
-      # 1. Mahalanobis distance from all points to current ellipsoid center
+      # === Inside-ellipsoid counting (still uses Mahalanobis) ===
       all_points <- pca_data[, c("PC1", "PC2", "PC3")]
       dists <- mahalanobis(x = all_points, center = center, cov = cov_matrix)
-      
-      # 2. Threshold for distance (1 SD)
-      threshold <- 2^2  # Adjust this if you want 2 SDs: use 4
-      
-      # 3. Get point count and CellIDs
+      threshold <- qchisq(0.95, df = 3)  # ~2 SD in Mahalanobis units (chi-square with df=3 → ~95% is ~7.81; adapt if desired)
       inside_mask <- dists <= threshold
-      inside_count <- sum(inside_mask)
       inside_cells <- pca_data[inside_mask, c("CellID", "Group")]
       inside_cells$Label <- paste0(inside_cells$Group, ": ", inside_cells$CellID)
       
-      # Collapse as single string per group
       ids_by_group <- inside_cells %>%
         group_by(Group) %>%
         summarise(IDs = paste(CellID, collapse = ", "), .groups = "drop") %>%
         mutate(Label = paste0(Group, ": ", IDs))
-      
-      # Final label string for table
       label_string <- paste(ids_by_group$Label, collapse = " | ")
       
-      
-      # 4. Append to stats
       ellipsoid_stats <- rbind(ellipsoid_stats, data.frame(
         Age = current_age,
+        Group = current_group,
         PointsInside = nrow(inside_cells),
         Threshold = threshold,
         IDs = label_string
       ))
       
-      
       base_color <- cluster_color_map[[as.character(current_age)]]
-      
       lighten_color <- function(hex, factor = 0.6) {
         rgb_vals <- col2rgb(hex) / 255
         hsv_vals <- rgb2hsv(rgb_vals)
         hsv(hsv_vals[1], hsv_vals[2], min(1, hsv_vals[3] + factor))
       }
-      
-      final_color <- if (current_group == "TeNT") {
-        lighten_color(base_color, 0.6)
-      } else {
-        base_color
-      }
+      final_color <- if (current_group == "TeNT") lighten_color(base_color, 0.6) else base_color
       
       plot <- plot %>%
         add_surface(
           x = ellipsoid$x, y = ellipsoid$y, z = ellipsoid$z,
           showscale = FALSE, opacity = 0.2,
           colorscale = list(c(0, 1), c(final_color, final_color)),
-          lighting = list(
-            ambient = 0.7, diffuse = 0.5, specular = 0.2,
-            roughness = 0.5, fresnel = 0.6),
+          lighting = list(ambient = 0.7, diffuse = 0.5, specular = 0.2,
+                          roughness = 0.5, fresnel = 0.6),
           lightposition = list(x=0, y=0, z=100)
         ) %>%
         add_surface(
@@ -2557,15 +2561,82 @@ kmeans_plotly_age3 <- function(data,
         )
     }
   }
+
+  # Build symbols (vectorized)
+  if (!is.null(symbol_by) && symbol_by %in% names(pca_data)) {
+    base_symbol_map <- c("Phasic" = "circle", "Tonic" = "square")
+    symbols <- base_symbol_map[as.character(pca_data[[symbol_by]])]
+    symbols[is.na(symbols)] <- "circle"
+  } else {
+    symbols <- rep("circle", nrow(pca_data))
+  }
+  
+  # Open marker for a group (e.g., TeNT) if requested (3D supports -open)
+  if (!is.null(symbol_by_group) && symbol_by_group %in% names(pca_data)) {
+    open_mask <- pca_data[[symbol_by_group]] == "TeNT"
+    symbols[open_mask] <- paste0(symbols[open_mask], "-open")
+  }
+  
+  # Colors for each point
+  point_colors <- unname(point_color_map[as.character(pca_data$Color)])
+  point_colors[is.na(point_colors)] <- "#666666"
+  
+  # Indices
+  hi_idx  <- isTRUE(pca_data$Top5Highlight) | pca_data$Top5Highlight == TRUE
+  reg_idx <- !hi_idx
+  
+  # Regular points (not highlighted)
+  if (any(reg_idx)) {
+    plot <- plot %>%
+      add_trace(
+        data = pca_data[reg_idx, ],
+        x = ~PC1, y = ~PC3, z = ~PC2,
+        type = "scatter3d", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group),
+        hoverinfo = "text",
+        marker = list(
+          size = 6,
+          color = point_colors[reg_idx],
+          symbol = symbols[reg_idx],
+          opacity = 0.5
+        ),
+        name = "Cells",
+        showlegend = FALSE
+      )
+  }
+  
+  # Highlighted points (Top-N closest to centroid within Age×Group)
+  if (any(hi_idx)) {
+    plot <- plot %>%
+      add_trace(
+        data = pca_data[hi_idx, ],
+        x = ~PC1, y = ~PC3, z = ~PC2,
+        type = "scatter3d", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group,
+                       "<br>Distance: ", round(DistanceToCentroid, 3)),
+        hoverinfo = "text",
+        marker = list(
+          size   = 9,                       # bigger than regular (6)
+          color  = point_colors[hi_idx],     # same color scheme as regular
+          symbol = symbols[hi_idx],          # same symbol mapping (incl. -open for TeNT)
+          opacity = 1                        # higher opacity than regular
+        ),
+        name = paste0("Top-", top_n, " closest"),
+        showlegend = FALSE
+      )
+  }
+  
+  
+  
   
   # Layout
   plot <- plot %>%
     layout(
       showlegend = FALSE,
       scene = list(
-        xaxis = list(title = "PC1", gridcolor = "grey10", showgrid = grid, zeroline = F),
-        yaxis = list(title = "PC3", gridcolor = "grey10", showgrid = grid, zeroline = F),
-        zaxis = list(title = "PC2", gridcolor = "grey10", showgrid = grid, zeroline = F),
+        xaxis = list(title = "PC1", gridcolor = "grey10", showgrid = grid, zeroline = FALSE),
+        yaxis = list(title = "PC3", gridcolor = "grey10", showgrid = grid, zeroline = FALSE),
+        zaxis = list(title = "PC2", gridcolor = "grey10", showgrid = grid, zeroline = FALSE),
         aspectmode = if (grid == FALSE) "cube" else "data",
         hovermode = "closest",
         camera = list(eye = list(x = 2.5, y = -3, z = 2))
@@ -2578,10 +2649,12 @@ kmeans_plotly_age3 <- function(data,
     pca_data = pca_data,
     ellipsoid_stats = ellipsoid_stats,
     centroid_coords = centroid_coords,
-    top5_closest = top5_closest  # if you kept that list
+    topk_closest = top5_closest,
+    distance_method = distance_method,
+    top_n = top_n
   ))
-  
 }
+
 
 
 
