@@ -2244,8 +2244,606 @@ kmeans_plotly_age2 <- function(data,
   print(plot)
   return(list(kmeans_result = kmeans_result, pca_data = pca_data))
 }
-
-
+kmeans_plotly_age2_grayRed <- function(data,
+                                       symbol_by = NULL,
+                                       symbol_by_group = NULL,
+                                       color_by = NULL, 
+                                       pca = TRUE,
+                                       max_clusters = 10,
+                                       auto_select = FALSE,
+                                       seed = 123,
+                                       scale_data = TRUE,
+                                       nstart = 25,
+                                       grid = TRUE) {
+  library(dplyr)
+  library(plotly)
+  library(RColorBrewer)
+  library(ggplot2)
+  
+  set.seed(seed)
+  
+  # Convert to data frame if necessary
+  data <- as.data.frame(data)
+  
+  # Select only numeric columns
+  numeric_data <- data %>% dplyr::select(where(is.numeric))
+  
+  # Scale data if requested
+  scaled_data <- if (scale_data) scale(numeric_data) else numeric_data
+  
+  # Elbow method for optimal clusters
+  wss <- sapply(1:max_clusters, function(k) {
+    kmeans(scaled_data, centers = k, nstart = nstart)$tot.withinss
+  })
+  
+  # Auto-select optimal clusters if requested
+  if (auto_select) {
+    optimal_clusters <- which.min(diff(diff(wss))) + 1  
+  } else {
+    # Plot the Elbow Curve
+    print(
+      ggplot(data.frame(Clusters = 1:max_clusters, WSS = wss), aes(x = Clusters, y = WSS)) +
+        geom_line() + geom_point() +
+        scale_x_continuous(breaks = 1:max_clusters) +
+        labs(title = "Elbow Method for Optimal Number of Clusters",
+             x = "Number of Clusters",
+             y = "Within-Cluster Sum of Squares") +
+        theme_minimal()
+    )
+    optimal_clusters <- as.integer(readline(prompt = "Enter the optimal number of clusters based on the Elbow plot: "))
+  }
+  
+  # Perform K-means clustering
+  kmeans_result <- kmeans(scaled_data, centers = optimal_clusters, nstart = nstart)
+  clustered_data <- data.frame(scaled_data, Cluster = as.factor(kmeans_result$cluster))
+  
+  # Perform PCA if requested
+  if (pca) {
+    pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
+    pca_data <- as.data.frame(pca_result$x)
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  } else {
+    pca_data <- as.data.frame(scaled_data)
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  }
+  pca_data$Cluster <- as.factor(kmeans_result$cluster)
+  
+  # Ensure categorical variables are properly assigned (safe-bind)
+  cols_to_bind <- c(symbol_by, symbol_by_group, color_by)
+  cols_to_bind <- cols_to_bind[!is.null(cols_to_bind)]
+  if (length(cols_to_bind)) {
+    pca_data <- cbind(pca_data, data[, cols_to_bind, drop = FALSE])
+  }
+  pca_data$Age   <- as.character(data$Age)
+  pca_data$Group <- as.character(data$Group)
+  
+  # ----- Symbols (robust) -----
+  default_symbol_map <- c("Phasic" = "circle", "Tonic" = "square")
+  get_symbol <- function(row) {
+    symkey <- if (!is.null(symbol_by)) as.character(row[[symbol_by]]) else NA
+    sym    <- if (!is.na(symkey) && symkey %in% names(default_symbol_map)) default_symbol_map[[symkey]] else "circle"
+    if (!is.null(symbol_by_group) && !is.null(row[[symbol_by_group]]) && !is.na(row[[symbol_by_group]]) && row[[symbol_by_group]] == "TeNT") {
+      sym <- paste0(sym, "-open")
+    }
+    sym
+  }
+  # ----- Publication palettes (Nature-comm-friendly) -----
+  unique_ages <- sort(unique(data$Age))
+  
+  # iMNTB: darker matte gray ramp (7 steps)
+  gray_palette <- colorRampPalette(
+    c("#B5B9BD", "#9DA3AA", "#868E97", "#6E7884", "#59626E", "#444C59", "#2E3643")
+  )(length(unique_ages))
+  
+  # TeNT / cMNTB: darker matte vermillion ramp (7 steps)
+  red_palette <- colorRampPalette(
+    c("#E7B7AD", "#D59080", "#C16A55", "#A9493A", "#8C3026", "#6F1F18", "#51140F")
+  )(length(unique_ages))
+  
+  
+  color_map_iMNTB <- setNames(gray_palette, unique_ages)
+  color_map_cMNTB <- setNames(red_palette,  unique_ages)
+  
+  # Vectorized color picker
+  get_age_group_color <- function(age, group, default = "#8E8E8E") {
+    age   <- as.character(age)
+    group <- as.character(group)
+    cols_i <- unname(color_map_iMNTB[age])
+    cols_c <- unname(color_map_cMNTB[age])
+    out <- ifelse(group %in% c("cMNTB","TeNT"), cols_c,
+                  ifelse(group %in% c("iMNTB","Control"), cols_i, default))
+    out[is.na(out)] <- default
+    out
+  }
+  
+  
+  
+  # Per-point colors for plotting (ignore color_by to enforce gray/red scheme)
+  pca_data$PointColor <- get_age_group_color(pca_data$Age, pca_data$Group)
+  
+  # 3D scatter plot
+  plot <- plot_ly()
+  
+  # NOTE: adding one trace per point is expensive; okay for moderate N.
+  for (index in 1:nrow(pca_data)) {
+    row <- pca_data[index, ]
+    symbol_to_use <- get_symbol(row)
+    
+    plot <- plot %>%
+      add_trace(
+        x = row$PC1, y = row$PC3, z = row$PC2,
+        type = "scatter3d",
+        mode = "markers",
+        marker = list(
+          size = 10,
+          color = row$PointColor,
+          symbol = symbol_to_use,
+          opacity = 0.005,
+          line = list(color = "rgba(0,0,0,0.55)", width = 0.5)
+        )
+        ,
+        hoverinfo = "text",
+        text = paste0("Age: ", row$Age, "<br>Group: ", row$Group,
+                      if (!is.null(symbol_by)) paste0("<br>", symbol_by, ": ", as.character(row[[symbol_by]])) else "")
+      )
+  }
+  
+  # Projections base plane
+  min_z <- min(pca_data$PC2, na.rm = TRUE)
+  
+  # Ellipsoids per (Age, Group)
+  age_group_combinations <- unique(data[, c("Age", "Group")])
+  
+  # Ellipsoid generator
+  generate_ellipsoid <- function(center, cov_matrix, num_points = 60) {
+    phi <- seq(0, 2 * pi, length.out = num_points)
+    theta <- seq(0, pi, length.out = num_points)
+    x <- outer(sin(theta), cos(phi))
+    y <- outer(sin(theta), sin(phi))
+    z <- outer(cos(theta), rep(1, length(phi)))
+    sphere_points <- cbind(as.vector(x), as.vector(y), as.vector(z))
+    eig <- eigen(cov_matrix)
+    scaling_factor <- 1
+    transformation <- eig$vectors %*% diag(sqrt(abs(eig$values)) * scaling_factor)
+    ellipsoid_points <- t(apply(sphere_points, 1, function(p) {
+      drop(transformation %*% p) + center
+    }))
+    list(
+      x = matrix(ellipsoid_points[, 1], nrow = num_points),
+      y = matrix(ellipsoid_points[, 3], nrow = num_points),
+      z = matrix(ellipsoid_points[, 2], nrow = num_points)
+    )
+  }
+  
+  for (r in 1:nrow(age_group_combinations)) {
+    current_age   <- as.character(age_group_combinations[r, "Age"])
+    current_group <- as.character(age_group_combinations[r, "Group"])
+    cluster_points <- pca_data[pca_data$Age == current_age & pca_data$Group == current_group, 1:3]
+    
+    if (nrow(cluster_points) > 2) {
+      center <- colMeans(cluster_points)
+      cov_matrix <- stats::cov(cluster_points)
+      ellipsoid <- generate_ellipsoid(center, cov_matrix)
+      
+      base_color <- get_age_group_color(current_age, current_group)[1]
+      final_color <- base_color  # keep as-is; adjust if you want lightening/darkening
+      
+      plot <- plot %>%
+        add_surface(
+          x = ellipsoid$x, 
+          y = ellipsoid$y, 
+          z = ellipsoid$z,
+          surfacecolor = matrix(0, nrow = nrow(ellipsoid$z), ncol = ncol(ellipsoid$z)),
+          cmin = 0, cmax = 1,
+          colorscale = list(list(0, final_color), list(1, final_color)),
+          showscale = FALSE, 
+          opacity = 1,
+       lighting = list(
+  ambient = 0.55,   # even base light
+  diffuse = 0.45,   # gentle shading
+  specular = 0.0,   # no gloss
+  roughness = 1.0,  # matte
+  fresnel = 0.05
+),
+          lightposition = list(x = 0, y = 0, z = 100)
+        ) %>%
+        add_surface(
+          x = ellipsoid$x, 
+          y = ellipsoid$y, 
+          z = matrix(min_z, nrow = nrow(ellipsoid$z), ncol = ncol(ellipsoid$z)),
+          surfacecolor = matrix(0, nrow = nrow(ellipsoid$z), ncol = ncol(ellipsoid$z)),
+          cmin = 0, cmax = 1,
+          colorscale = list(list(0, final_color), list(1, final_color)),
+          showscale = FALSE, 
+          opacity = 0.4
+        )
+    }
+  }
+  #c("#F3EFE8","#DDD7C9","#C7BEAD","#AFA68F","#8F886F","#6F6B54")
+  # Layout
+  plot <- plot %>% layout(
+    paper_bgcolor = "white",
+    plot_bgcolor  = "white",
+    scene = list(
+      aspectmode = "data",
+      xaxis = list(
+        title = "PC1",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(250, 250, 250, 1)"  # light gray tone
+      ),
+      yaxis = list(
+        title = "PC3",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(245, 245, 245, 1)"  # slightly darker
+      ),
+      zaxis = list(
+        title = "PC2",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(240, 240, 240, 1)"  # deepest gray tone
+      ),
+      camera = list(eye = list(x = 2.5, y = -3, z = 2))
+    ),
+    showlegend = FALSE
+  )
+  
+  
+  
+  print(plot)
+  return(list(kmeans_result = kmeans_result, pca_data = pca_data))
+}
+kmeans_plotly_age2_grayRed2 <- function(data,
+                                       symbol_by = NULL,
+                                       symbol_by_group = NULL,
+                                       color_by = NULL, 
+                                       pca = TRUE,
+                                       max_clusters = 10,
+                                       auto_select = FALSE,
+                                       seed = 123,
+                                       scale_data = TRUE,
+                                       nstart = 25,
+                                       grid = TRUE) {
+  library(dplyr)
+  library(plotly)
+  library(RColorBrewer)
+  library(ggplot2)
+  
+  set.seed(seed)
+  
+  # Convert to data frame if necessary
+  data <- as.data.frame(data)
+  
+  # Select only numeric columns
+  numeric_data <- data %>% dplyr::select(where(is.numeric))
+  
+  # Scale data if requested
+  scaled_data <- if (scale_data) scale(numeric_data) else numeric_data
+  
+  # Elbow method for optimal clusters
+  wss <- sapply(1:max_clusters, function(k) {
+    kmeans(scaled_data, centers = k, nstart = nstart)$tot.withinss
+  })
+  
+  # Auto-select optimal clusters if requested
+  if (auto_select) {
+    optimal_clusters <- which.min(diff(diff(wss))) + 1  
+  } else {
+    # Plot the Elbow Curve
+    print(
+      ggplot(data.frame(Clusters = 1:max_clusters, WSS = wss), aes(x = Clusters, y = WSS)) +
+        geom_line() + geom_point() +
+        scale_x_continuous(breaks = 1:max_clusters) +
+        labs(title = "Elbow Method for Optimal Number of Clusters",
+             x = "Number of Clusters",
+             y = "Within-Cluster Sum of Squares") +
+        theme_minimal()
+    )
+    optimal_clusters <- as.integer(readline(prompt = "Enter the optimal number of clusters based on the Elbow plot: "))
+  }
+  
+  # Perform K-means clustering
+  kmeans_result <- kmeans(scaled_data, centers = optimal_clusters, nstart = nstart)
+  clustered_data <- data.frame(scaled_data, Cluster = as.factor(kmeans_result$cluster))
+  
+  # Perform PCA if requested
+  if (pca) {
+    pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
+    pca_data <- as.data.frame(pca_result$x)
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  } else {
+    pca_data <- as.data.frame(scaled_data)
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  }
+  pca_data$Cluster <- as.factor(kmeans_result$cluster)
+  
+  # Ensure categorical variables are properly assigned (safe-bind)
+  cols_to_bind <- c(symbol_by, symbol_by_group, color_by)
+  cols_to_bind <- cols_to_bind[!is.null(cols_to_bind)]
+  if (length(cols_to_bind)) {
+    pca_data <- cbind(pca_data, data[, cols_to_bind, drop = FALSE])
+  }
+  pca_data$Age   <- as.character(data$Age)
+  pca_data$Group <- as.character(data$Group)
+  
+  # ----- Symbols (robust) -----
+  default_symbol_map <- c("Phasic" = "circle", "Tonic" = "square")
+  get_symbol <- function(row) {
+    symkey <- if (!is.null(symbol_by)) as.character(row[[symbol_by]]) else NA
+    sym    <- if (!is.na(symkey) && symkey %in% names(default_symbol_map)) default_symbol_map[[symkey]] else "circle"
+    if (!is.null(symbol_by_group) && !is.null(row[[symbol_by_group]]) && !is.na(row[[symbol_by_group]]) && row[[symbol_by_group]] == "TeNT") {
+      sym <- paste0(sym, "-open")
+    }
+    sym
+  }
+  # ----- Publication palettes (Nature-comm-friendly) -----
+  unique_ages <- sort(unique(data$Age))
+  
+  # iMNTB: darker matte gray ramp (7 steps)
+  gray_palette <- colorRampPalette(
+    c("#B5B9BD", "#9DA3AA", "#868E97", "#6E7884", "#59626E", "#444C59", "#2E3643")
+  )(length(unique_ages))
+  
+  # TeNT / cMNTB: darker matte vermillion ramp (7 steps)
+  red_palette <- colorRampPalette(
+    c("#E7B7AD", "#D59080", "#C16A55", "#A9493A", "#8C3026", "#6F1F18", "#51140F")
+  )(length(unique_ages))
+  
+  
+  color_map_iMNTB <- setNames(gray_palette, unique_ages)
+  color_map_cMNTB <- setNames(red_palette,  unique_ages)
+  
+  # Vectorized color picker
+  get_age_group_color <- function(age, group, default = "#8E8E8E") {
+    age   <- as.character(age)
+    group <- as.character(group)
+    cols_i <- unname(color_map_iMNTB[age])
+    cols_c <- unname(color_map_cMNTB[age])
+    out <- ifelse(group %in% c("cMNTB","TeNT"), cols_c,
+                  ifelse(group %in% c("iMNTB","Control"), cols_i, default))
+    out[is.na(out)] <- default
+    out
+  }
+  
+  
+  
+  # Per-point colors for plotting (ignore color_by to enforce gray/red scheme)
+  pca_data$PointColor <- get_age_group_color(pca_data$Age, pca_data$Group)
+  
+  # 3D scatter plot
+  plot <- plot_ly()
+  
+  # NOTE: adding one trace per point is expensive; okay for moderate N.
+  for (index in 1:nrow(pca_data)) {
+    row <- pca_data[index, ]
+    symbol_to_use <- get_symbol(row)
+    
+    plot <- plot %>%
+      add_trace(
+        x = row$PC1, y = row$PC3, z = row$PC2,
+        type = "scatter3d",
+        mode = "markers",
+        marker = list(
+          size = 10,
+          color = row$PointColor,
+          symbol = symbol_to_use,
+          opacity = 0.005,
+          line = list(color = "rgba(0,0,0,0.55)", width = 0.5)
+        )
+        ,
+        hoverinfo = "text",
+        text = paste0("Age: ", row$Age, "<br>Group: ", row$Group,
+                      if (!is.null(symbol_by)) paste0("<br>", symbol_by, ": ", as.character(row[[symbol_by]])) else "")
+      )
+  }
+  
+  # Projections base plane
+  min_z <- min(pca_data$PC2, na.rm = TRUE)-0.5
+  
+  # Ellipsoids per (Age, Group)
+  age_group_combinations <- unique(data[, c("Age", "Group")])
+  
+  # Ellipsoid generator
+  generate_ellipsoid <- function(center, cov_matrix, num_points = 60, scale_mult = 1) {
+    # Parametric sphere
+    phi   <- seq(0, 2 * pi, length.out = num_points)
+    theta <- seq(0,     pi, length.out = num_points)
+    x <- outer(sin(theta), cos(phi))
+    y <- outer(sin(theta), sin(phi))
+    z <- outer(cos(theta), rep(1, length(phi)))
+    sphere_points <- cbind(as.vector(x), as.vector(y), as.vector(z))
+    
+    # Eigen-decomposition of covariance
+    eig <- eigen(cov_matrix)
+    # sqrt(eig$values) gives the SD radii along principal axes
+    # multiply by scale_mult to inflate/deflate
+    transformation <- eig$vectors %*% diag(sqrt(abs(eig$values)) * scale_mult)
+    
+    ellipsoid_points <- t(apply(sphere_points, 1, function(p) {
+      drop(transformation %*% p) + center
+    }))
+    
+    list(
+      x = matrix(ellipsoid_points[, 1], nrow = num_points),
+      y = matrix(ellipsoid_points[, 3], nrow = num_points),  # swapped PC3<->PC2 like you did
+      z = matrix(ellipsoid_points[, 2], nrow = num_points)
+    )
+  }
+  
+  
+  for (r in 1:nrow(age_group_combinations)) {
+    current_age   <- as.character(age_group_combinations[r, "Age"])
+    current_group <- as.character(age_group_combinations[r, "Group"])
+    cluster_points <- pca_data[pca_data$Age == current_age & pca_data$Group == current_group, 1:3]
+    
+    if (nrow(cluster_points) > 2) {
+      center     <- colMeans(cluster_points)
+      cov_matrix <- stats::cov(cluster_points)
+      
+      # Inner = 1 SD envelope
+      ellipsoid_inner <- generate_ellipsoid(center, cov_matrix, scale_mult = 1)
+      
+      # Outer = 2 SD envelope
+      ellipsoid_outer <- generate_ellipsoid(center, cov_matrix, scale_mult = 2)
+      
+      base_color  <- get_age_group_color(current_age, current_group)[1]
+      final_color <- base_color
+      
+      # Helper to turn a hex color "#RRGGBB" into an rgba() with custom alpha for outline-ish effect
+      hex_to_rgba <- function(hex, alpha = 0.2) {
+        hex <- gsub("#", "", hex)
+        r <- strtoi(substr(hex, 1, 2), 16L)
+        g <- strtoi(substr(hex, 3, 4), 16L)
+        b <- strtoi(substr(hex, 5, 6), 16L)
+        paste0("rgba(", r, ",", g, ",", b, ",", alpha, ")")
+      }
+      
+      outer_color_transparent <- hex_to_rgba(final_color, alpha = 0.15)
+      
+      # 1) solid inner ellipsoid (cluster "core")
+      plot <- plot %>%
+        add_surface(
+          x = ellipsoid_inner$x,
+          y = ellipsoid_inner$y,
+          z = ellipsoid_inner$z,
+          surfacecolor = matrix(0, nrow = nrow(ellipsoid_inner$z), ncol = ncol(ellipsoid_inner$z)),
+          cmin = 0, cmax = 1,
+          colorscale = list(list(0, final_color), list(1, final_color)),
+          showscale = FALSE,
+          opacity = 1,
+          lighting = list(
+            ambient = 0.55,
+            diffuse = 0.45,
+            specular = 0.0,
+            roughness = 1.0,
+            fresnel = 0.0
+          ),
+          lightposition = list(x = 0, y = 0, z = 100)
+        )
+      
+      # 2) translucent outer ellipsoid (spread ~2 SD)
+      # Create subtle random texture for "dotted" look
+      # Create subtle random texture for "dotted" look
+      noise_mat <- matrix(runif(length(ellipsoid_outer$z), min = 0.5, max = 2.0),
+                          nrow = nrow(ellipsoid_outer$z), ncol = ncol(ellipsoid_outer$z))
+      
+      plot <- plot %>%
+        add_surface(
+          x = ellipsoid_outer$x,
+          y = ellipsoid_outer$y,
+          z = ellipsoid_outer$z,
+          surfacecolor = noise_mat,         # random pattern breaks smoothness
+          cmin = 0.9, cmax = 1.1,
+          colorscale = list(
+            list(0, outer_color_transparent),
+            list(1, outer_color_transparent)
+          ),
+          showscale = FALSE,
+          opacity = 0.3,
+          lighting = list(
+            ambient = 0.5,
+            diffuse = 0.3,
+            specular = 0.8,
+            roughness = 0.3,
+            fresnel = 0.6
+          )
+        )
+      
+      
+      
+      # 3) base-plane "shadow" for the INNER ellipsoid (optional, keep what you had)
+      plot <- plot %>%
+        add_surface(
+          x = ellipsoid_inner$x,
+          y = ellipsoid_inner$y,
+          z = matrix(min_z, nrow = nrow(ellipsoid_inner$z), ncol = ncol(ellipsoid_inner$z)),
+          surfacecolor = matrix(0, nrow = nrow(ellipsoid_inner$z), ncol = ncol(ellipsoid_inner$z)),
+          cmin = 0, cmax = 1,
+          colorscale = list(list(0, final_color), list(1, final_color)),
+          showscale = FALSE,
+          opacity = 0.7
+        )
+      
+      # 4) base-plane "shadow" for the OUTER ellipsoid (~2 SD projection)
+      plot <- plot %>%
+        add_surface(
+          x = ellipsoid_outer$x,
+          y = ellipsoid_outer$y,
+          z = matrix(min_z, nrow = nrow(ellipsoid_outer$z), ncol = ncol(ellipsoid_outer$z)),
+          surfacecolor = matrix(0, nrow = nrow(ellipsoid_outer$z), ncol = ncol(ellipsoid_outer$z)),
+          cmin = 0, cmax = 1,
+          colorscale = list(list(0, outer_color_transparent), list(1, outer_color_transparent)),
+          showscale = FALSE,
+          opacity = 0.3   # slightly lighter shadow than the inner one
+        )
+    }
+  }
+  #c("#F3EFE8","#DDD7C9","#C7BEAD","#AFA68F","#8F886F","#6F6B54")
+  # Layout
+  plot <- plot %>% layout(
+    paper_bgcolor = "white",
+    plot_bgcolor  = "white",
+    scene = list(
+      aspectmode = "data",
+      xaxis = list(
+        title = "PC1",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(250, 250, 250, 1)"  
+      ),
+      yaxis = list(
+        title = "PC3",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(252, 252, 252, 1)"  
+      ),
+      zaxis = list(
+        title = "PC2",
+        gridcolor = "gray5",
+        zeroline = FALSE,
+        showline = TRUE,
+        linecolor = "gray5",
+        tick0 = 0,
+        dtick = 2,
+        showbackground = TRUE,
+        backgroundcolor = "rgba(255, 255, 255, 1)"  # deepest gray tone
+      ),
+      camera = list(eye = list(x = 2.5, y = -3, z = 2))
+    ),
+    showlegend = FALSE
+  )
+  
+  
+  
+  print(plot)
+  return(list(kmeans_result = kmeans_result, pca_data = pca_data))
+}
 
 #The function bellow calculate the closest value to the centroids of each age or cluster
 kmeans_plotly_age3 <- function(data,
@@ -2598,7 +3196,7 @@ kmeans_plotly_age3 <- function(data,
           size = 6,
           color = point_colors[reg_idx],
           symbol = symbols[reg_idx],
-          opacity = 0.5
+          opacity = 0.0005
         ),
         name = "Cells",
         showlegend = FALSE
@@ -2653,6 +3251,663 @@ kmeans_plotly_age3 <- function(data,
     distance_method = distance_method,
     top_n = top_n
   ))
+}
+
+# 2D version with selectable axes (e.g., c("PC1","PC2") or c("PC1","PC3"))
+kmeans_plotly_age3_2d <- function(data,
+                                  symbol_by = NULL,
+                                  symbol_by_group = NULL,
+                                  color_by = NULL,
+                                  pca = TRUE,
+                                  max_clusters = 10,
+                                  auto_select = FALSE,
+                                  seed = 123,
+                                  scale_data = TRUE,
+                                  nstart = 25,
+                                  grid = TRUE,
+                                  distance_method = c("euclidean", "mahalanobis"),
+                                  top_n = 5,
+                                  md_eps = 1e-6,
+                                  dim_pair = c("PC1", "PC2")) {
+  library(dplyr)
+  library(plotly)
+  library(RColorBrewer)
+  library(ggplot2)
+  
+  distance_method <- match.arg(distance_method)
+  stopifnot(top_n >= 1)
+  
+  # ---- helpers --------------------------------------------------------------
+  generate_ellipse_2d <- function(center, cov2, n = 120, level = 0.95) {
+    # Draw a confidence ellipse using eigen decomposition.
+    # center: length-2 numeric (x,y)
+    # cov2: 2x2 covariance matrix
+    # level: confidence level for chi-square scaling (df = 2)
+    theta <- seq(0, 2 * pi, length.out = n)
+    circle <- rbind(cos(theta), sin(theta)) # 2 x n
+    eig <- eigen(cov2)
+    # scale by chi-square quantile for the requested probability mass
+    scale <- sqrt(qchisq(level, df = 2))
+    A <- eig$vectors %*% diag(sqrt(pmax(eig$values, 0)), 2, 2) * scale
+    pts <- (A %*% circle)
+    data.frame(x = center[1] + pts[1, ], y = center[2] + pts[2, ])
+  }
+  
+  lighten_color <- function(hex, factor = 0.6) {
+    rgb_vals <- col2rgb(hex) / 255
+    hsv_vals <- rgb2hsv(rgb_vals)
+    grDevices::hsv(hsv_vals[1], hsv_vals[2], min(1, hsv_vals[3] + factor))
+  }
+  
+  # ---- set up ---------------------------------------------------------------
+  set.seed(seed)
+  data <- as.data.frame(data)
+  
+  numeric_data <- data %>% select(where(is.numeric))
+  scaled_data  <- if (scale_data) scale(numeric_data) else numeric_data
+  
+  # WSS for elbow
+  wss <- sapply(1:max_clusters, function(k) {
+    kmeans(scaled_data, centers = k, nstart = nstart)$tot.withinss
+  })
+  
+  if (auto_select) {
+    optimal_clusters <- which.min(diff(diff(wss))) + 1
+  } else {
+    print(
+      ggplot(data.frame(Clusters = 1:max_clusters, WSS = wss),
+             aes(x = Clusters, y = WSS)) +
+        geom_line() + geom_point() +
+        scale_x_continuous(breaks = 1:max_clusters) +
+        labs(title = "Elbow Method for Optimal Number of Clusters",
+             x = "Number of Clusters", y = "Within-Cluster Sum of Squares") +
+        theme_minimal()
+    )
+    optimal_clusters <- as.integer(readline(
+      prompt = "Enter the optimal number of clusters based on the Elbow plot: "
+    ))
+  }
+  
+  kmeans_result <- kmeans(scaled_data, centers = optimal_clusters, nstart = nstart)
+  
+  # PCA (or use first 3 numeric dims as PC-like names)
+  if (pca) {
+    pca_result <- prcomp(scaled_data, center = TRUE, scale. = TRUE)
+    pca_data <- as.data.frame(pca_result$x)
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  } else {
+    pca_data <- as.data.frame(scaled_data)
+    # Ensure at least 3 columns exist:
+    if (ncol(pca_data) < 3) stop("Need at least 3 numeric columns when pca=FALSE.")
+    colnames(pca_data)[1:3] <- c("PC1", "PC2", "PC3")
+  }
+  
+  # Carry over IDs/metadata
+  pca_data$CellID <- as.character(data$`Cell ID`)
+  pca_data$Cluster <- as.factor(kmeans_result$cluster)
+  if (!is.null(symbol_by))      pca_data[[symbol_by]]      <- data[[symbol_by]]
+  if (!is.null(symbol_by_group)) pca_data[[symbol_by_group]] <- data[[symbol_by_group]]
+  if (!is.null(color_by))       pca_data$Color <- as.factor(data[[color_by]]) else pca_data$Color <- pca_data$Cluster
+  pca_data$Age   <- as.character(data$Age)
+  pca_data$Group <- as.character(data$Group)
+  pca_data$Top5Highlight <- FALSE
+  pca_data$DistanceToCentroid <- NA_real_
+  
+  # Colors
+  unique_ages <- sort(unique(data$Age))
+  age_palette <- colorRampPalette(
+    #c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E")
+    c("#B23AEE", "#00B2EE", "#EEAD0E")
+  )(length(unique_ages))
+  cluster_color_map <- setNames(age_palette, unique_ages)
+  
+  if (!is.null(color_by)) {
+    unique_colors <- sort(unique(pca_data$Color))
+    point_palette <- colorRampPalette(
+      #c("gray1","gray35","gray60","gray75","#B23AEE", "#00B2EE", "#EEAD0E")
+      c("#B23AEE", "#00B2EE", "#EEAD0E")
+      
+    )(length(unique_colors))
+    point_color_map <- setNames(point_palette, unique_colors)
+  } else {
+    point_color_map <- cluster_color_map
+  }
+  
+  # Validate requested axes
+  stopifnot(length(dim_pair) == 2)
+  stopifnot(all(dim_pair %in% c("PC1","PC2","PC3")))
+  xcol <- dim_pair[1]; ycol <- dim_pair[2]
+  
+  # ---- compute highlights & centroids in 3D (unchanged logic) --------------
+  age_group_combinations <- unique(data[, c("Age", "Group")])
+  
+  ellipsoid_stats <- data.frame(
+    Age = character(), Group = character(),
+    PointsInside = integer(), Threshold = numeric(), IDs = character(),
+    stringsAsFactors = FALSE
+  )
+  top5_closest <- list()
+  centroid_coords <- data.frame(
+    Age = character(), Group = character(),
+    PC1 = numeric(), PC2 = numeric(), PC3 = numeric(),
+    stringsAsFactors = FALSE
+  )
+  
+  # distance helper (3D)
+  compute_distances <- function(X, center_vec, cov_mat = NULL) {
+    if (distance_method == "euclidean") {
+      dif <- sweep(X, 2, center_vec, "-")
+      return(sqrt(rowSums(dif^2)))
+    } else {
+      if (is.null(cov_mat)) stop("cov_mat is required for Mahalanobis")
+      cov_try <- cov_mat
+      ok <- FALSE
+      for (ridge in c(0, md_eps, 10*md_eps, 100*md_eps)) {
+        cov_try <- cov_mat + diag(ridge, ncol(cov_mat))
+        if (all(is.finite(cov_try)) && isTRUE(all.equal(cov_try, t(cov_try)))) {
+          chol_ok <- tryCatch({ chol(cov_try); TRUE }, error = function(e) FALSE)
+          if (chol_ok) { ok <- TRUE; break }
+        }
+      }
+      if (!ok) {
+        warning("Covariance not PD even after regularization; falling back to Euclidean.")
+        dif <- sweep(X, 2, center_vec, "-")
+        return(sqrt(rowSums(dif^2)))
+      }
+      return(mahalanobis(X, center = center_vec, cov = cov_try))
+    }
+  }
+  
+  for (row_i in 1:nrow(age_group_combinations)) {
+    current_age   <- age_group_combinations[row_i, "Age"]
+    current_group <- age_group_combinations[row_i, "Group"]
+    
+    subset_points3d <- pca_data %>%
+      dplyr::filter(Age == current_age, Group == current_group) %>%
+      select(PC1, PC2, PC3)
+    
+    if (nrow(subset_points3d) > 2) {
+      center3d <- colMeans(subset_points3d)
+      centroid_coords <- rbind(
+        centroid_coords,
+        data.frame(Age = current_age, Group = current_group,
+                   PC1 = center3d["PC1"], PC2 = center3d["PC2"], PC3 = center3d["PC3"])
+      )
+      
+      # Compute distances (within Age×Group)
+      group_cells <- pca_data %>%
+        dplyr::filter(Age == current_age, Group == current_group)
+      
+      if (nrow(group_cells) > 2) {
+        coords3d <- as.matrix(group_cells[, c("PC1","PC2","PC3")])
+        dists <- compute_distances(
+          X = coords3d,
+          center_vec = as.numeric(center3d),
+          cov_mat = if (distance_method == "mahalanobis") cov(coords3d) else NULL
+        )
+        # Save back
+        pca_data$DistanceToCentroid[match(group_cells$CellID, pca_data$CellID)] <- dists
+        
+        # Top-N closest
+        n_take <- min(top_n, nrow(group_cells))
+        topk <- group_cells %>%
+          mutate(Distance = dists) %>%
+          arrange(Distance) %>%
+          slice(1:n_take) %>%
+          select(CellID, Distance)
+        
+        pca_data$Top5Highlight[pca_data$CellID %in% as.character(topk$CellID)] <- TRUE
+        top5_closest[[paste0(current_age, "_", current_group)]] <- topk
+        
+        # 95% inclusion count using Mahalanobis in 3D
+        all3d <- as.matrix(pca_data[, c("PC1","PC2","PC3")])
+        D2    <- mahalanobis(all3d, center = center3d, cov = cov(subset_points3d))
+        thr   <- qchisq(0.95, df = 3)
+        inside_mask <- D2 <= thr
+        inside_cells <- pca_data[inside_mask, c("CellID","Group")]
+        
+        ids_by_group <- inside_cells %>%
+          group_by(Group) %>%
+          summarise(IDs = paste(CellID, collapse = ", "), .groups = "drop") %>%
+          mutate(Label = paste0(Group, ": ", IDs))
+        label_string <- paste(ids_by_group$Label, collapse = " | ")
+        
+        ellipsoid_stats <- rbind(
+          ellipsoid_stats,
+          data.frame(Age = current_age, Group = current_group,
+                     PointsInside = nrow(inside_cells),
+                     Threshold = thr, IDs = label_string)
+        )
+      }
+    }
+  }
+  
+  # ---- symbols & colors (2D plotly) ----------------------------------------
+  base_symbol_map <- c("Phasic" = "circle", "Tonic" = "square")
+  if (!is.null(symbol_by) && symbol_by %in% names(pca_data)) {
+    symbols <- base_symbol_map[as.character(pca_data[[symbol_by]])]
+    symbols[is.na(symbols)] <- "circle"
+  } else {
+    symbols <- rep("circle", nrow(pca_data))
+  }
+  if (!is.null(symbol_by_group) && symbol_by_group %in% names(pca_data)) {
+    open_mask <- pca_data[[symbol_by_group]] == "TeNT"
+    symbols[open_mask] <- paste0(symbols[open_mask], "-open")  # e.g., circle-open
+  }
+  
+  point_colors <- unname(point_color_map[as.character(pca_data$Color)])
+  point_colors[is.na(point_colors)] <- "#666666"
+  
+  hi_idx  <- pca_data$Top5Highlight %in% TRUE
+  reg_idx <- !hi_idx
+  
+  # ---- build 2D plot -------------------------------------------------------
+  plt <- plot_ly()
+  
+  # Draw 95% covariance ellipses per Age×Group in the chosen 2D plane
+  age_group_combinations <- unique(pca_data[, c("Age","Group")])
+  for (i in 1:nrow(age_group_combinations)) {
+    ag <- age_group_combinations$Age[i]
+    gp <- age_group_combinations$Group[i]
+    sub <- pca_data %>% dplyr::filter(Age == ag, Group == gp)
+    if (nrow(sub) > 2) {
+      xy <- sub[, c(xcol, ycol)]
+      cov2 <- stats::cov(xy)
+      center2 <- colMeans(xy)
+      # handle potential singular cov
+      if (all(is.finite(cov2)) && isTRUE(all.equal(cov2, t(cov2))) &&
+          !any(is.na(cov2))) {
+        # try eigen
+        eig_ok <- tryCatch({ eigen(cov2); TRUE }, error = function(e) FALSE)
+        if (eig_ok) {
+          ell <- generate_ellipse_2d(center2, cov2, level = 0.005)
+          base_col <- cluster_color_map[[as.character(ag)]]
+          final_col <- if (gp == "TeNT") lighten_color(base_col, 0.6) else base_col
+          plt <- plt %>%
+            add_trace(
+              data = ell,
+              x = ~x, y = ~y,
+              type = "scatter", mode = "lines",
+              line = list(width = 2, color = final_col),
+              opacity = 0.6,
+              hoverinfo = "none",
+              showlegend = FALSE
+            )
+          # centroid point
+          plt <- plt %>%
+            add_trace(
+              x = center2[1], y = center2[2],
+              type = "scatter", mode = "markers",
+              marker = list(size = 10, color = final_col, symbol = "x"),
+              hoverinfo = "text",
+              text = paste0("Centroid<br>Age: ", ag, "<br>Group: ", gp),
+              showlegend = FALSE
+            )
+          # small radial lines from Top-N highlights (within this Age×Group)
+          hi_sub <- sub[sub$Top5Highlight %in% TRUE, , drop = FALSE]
+          if (nrow(hi_sub) > 0) {
+            for (j in 1:nrow(hi_sub)) {
+              plt <- plt %>%
+                add_trace(
+                  x = c(hi_sub[[xcol]][j], center2[1]),
+                  y = c(hi_sub[[ycol]][j], center2[2]),
+                  type = "scatter", mode = "lines",
+                  line = list(color = "gray", width = 1),
+                  opacity = 0.001,
+                  hoverinfo = "none",
+                  showlegend = FALSE
+                )
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  # Regular points
+  if (any(reg_idx)) {
+    plt <- plt %>%
+      add_trace(
+        data = pca_data[reg_idx, ],
+        x = as.formula(paste0("~", xcol)),
+        y = as.formula(paste0("~", ycol)),
+        type = "scatter", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group),
+        hoverinfo = "text",
+        marker = list(
+          size = 8,
+          color = point_colors[reg_idx],
+          symbol = symbols[reg_idx],
+          opacity = 0.25
+        ),
+        showlegend = FALSE
+      )
+  }
+  
+  # Highlighted points
+  if (any(hi_idx)) {
+    plt <- plt %>%
+      add_trace(
+        data = pca_data[hi_idx, ],
+        x = as.formula(paste0("~", xcol)),
+        y = as.formula(paste0("~", ycol)),
+        type = "scatter", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group,
+                       "<br>Distance: ", round(DistanceToCentroid, 3)),
+        hoverinfo = "text",
+        marker = list(
+          size = 10,
+          color = point_colors[hi_idx],
+          symbol = symbols[hi_idx],
+          opacity = 1
+        ),
+        name = paste0("Top-", top_n, " closest"),
+        showlegend = FALSE
+      )
+  }
+  
+  # Layout
+  plt <- plt %>%
+    layout(
+      xaxis = list(title = xcol, showgrid = grid, zeroline = FALSE),
+      yaxis = list(title = ycol, showgrid = grid, zeroline = FALSE),
+      hovermode = "closest"
+    )
+  
+  print(plt)
+  
+  list(
+    kmeans_result   = kmeans_result,
+    pca_data        = pca_data,
+    ellipsoid_stats = ellipsoid_stats,   # still 3D mahalanobis inclusion stats
+    centroid_coords = centroid_coords,
+    topk_closest    = top5_closest,
+    distance_method = distance_method,
+    top_n           = top_n,
+    dim_pair        = dim_pair
+  )
+}
+kmeans_plotly_age3_2d_grayRed <- function(
+    data,
+    symbol_by = NULL,
+    symbol_by_group = NULL,
+    color_by = NULL,               # kept but not used for color; Age×Group colors dominate
+    pca = TRUE,
+    max_clusters = 10,
+    auto_select = FALSE,
+    seed = 123,
+    scale_data = TRUE,
+    nstart = 25,
+    grid = TRUE,
+    distance_method = c("euclidean", "mahalanobis"),
+    top_n = 5,
+    md_eps = 1e-6,
+    dim_pair = c("PC1", "PC2"),
+    ellipse_level = 1,             # k SD; default 1 SD
+    inclusion_scope = c("within","global")
+) {
+  library(dplyr)
+  library(plotly)
+  library(RColorBrewer)
+  library(ggplot2)
+  
+  distance_method <- match.arg(distance_method)
+  inclusion_scope <- match.arg(inclusion_scope)
+  stopifnot(top_n >= 1)
+  stopifnot(length(dim_pair) == 2)
+  stopifnot(all(dim_pair %in% c("PC1","PC2","PC3")))
+  stopifnot(is.numeric(ellipse_level) && ellipse_level > 0)
+  
+  set.seed(seed)
+  data <- as.data.frame(data)
+  
+  # -- helpers ---------------------------------------------------------------
+  generate_ellipse_2d <- function(center, cov2, k_sd = 1, n = 180) {
+    theta <- seq(0, 2*pi, length.out = n)
+    circle <- rbind(cos(theta), sin(theta))
+    eig <- eigen(cov2, symmetric = TRUE)
+    A <- eig$vectors %*% diag(k_sd * sqrt(pmax(eig$values, 0)), 2, 2)
+    pts <- A %*% circle
+    data.frame(x = center[1] + pts[1, ], y = center[2] + pts[2, ])
+  }
+  make_pd <- function(S, eps = md_eps, tries = 6) {
+    if (all(is.finite(S))) {
+      for (i in 0:tries) {
+        ridge <- (10^i) * eps
+        S2 <- S + diag(ridge, ncol(S))
+        ok <- tryCatch({ chol(S2); TRUE }, error = function(e) FALSE)
+        if (ok) return(S2)
+      }
+    }
+    diag(max(1e-6, mean(diag(S), na.rm = TRUE)), ncol(S))
+  }
+  
+  # -- data prep -------------------------------------------------------------
+  numeric_data <- data %>% dplyr::select(where(is.numeric))
+  if (ncol(numeric_data) < 3) stop("Need at least 3 numeric columns.")
+  scaled_for_km <- if (scale_data) scale(numeric_data) else as.matrix(numeric_data)
+  
+  wss <- sapply(1:max_clusters, function(k)
+    kmeans(scaled_for_km, centers = k, nstart = nstart)$tot.withinss
+  )
+  if (auto_select) {
+    elbow <- diff(diff(wss))
+    optimal_clusters <- which.min(elbow) + 1
+    if (length(optimal_clusters) == 0 || is.na(optimal_clusters)) optimal_clusters <- 2
+  } else {
+    print(
+      ggplot(data.frame(Clusters = 1:max_clusters, WSS = wss),
+             aes(Clusters, WSS)) +
+        geom_line() + geom_point() +
+        scale_x_continuous(breaks = 1:max_clusters) +
+        labs(title = "Elbow Method for Optimal Number of Clusters",
+             x = "Number of Clusters", y = "Within-Cluster Sum of Squares") +
+        theme_minimal()
+    )
+    if (interactive()) {
+      optimal_clusters <- as.integer(readline("Enter k (clusters): "))
+      if (is.na(optimal_clusters) || optimal_clusters < 1) optimal_clusters <- 2
+    } else {
+      warning("Non-interactive session; defaulting optimal_clusters = 2")
+      optimal_clusters <- 2
+    }
+  }
+  
+  km <- kmeans(scaled_for_km, centers = optimal_clusters, nstart = nstart)
+  
+  # PCA coords (avoid double scaling)
+  if (pca) {
+    pc <- prcomp(numeric_data, center = scale_data, scale. = scale_data)
+    pca_data <- as.data.frame(pc$x)
+  } else {
+    pca_data <- as.data.frame(scaled_for_km)
+  }
+  colnames(pca_data)[1:3] <- c("PC1","PC2","PC3")
+  
+  # IDs / metadata
+  if ("Cell ID" %in% names(data)) pca_data$CellID <- as.character(data$`Cell ID`) else pca_data$CellID <- as.character(seq_len(nrow(pca_data)))
+  pca_data$Cluster <- as.factor(km$cluster)
+  if (!is.null(symbol_by))       pca_data[[symbol_by]]       <- data[[symbol_by]]
+  if (!is.null(symbol_by_group)) pca_data[[symbol_by_group]] <- data[[symbol_by_group]]
+  if (!is.null(color_by))        pca_data$ColorMeta          <- data[[color_by]]
+  pca_data$Age   <- as.character(data$Age)
+  pca_data$Group <- as.character(data$Group)
+  pca_data$Top5Highlight <- FALSE
+  pca_data$DistanceToCentroid <- NA_real_
+  
+  # Colors (Age×Group ramps)
+  unique_ages <- sort(unique(pca_data$Age)); n_age <- length(unique_ages)
+  # iMNTB / control: colder, bluish-gray range
+  gray_palette <- colorRampPalette(
+    c("#B5B9BD","#9DA3AA","#868E97","#6E7884","#59626E","#444C59","#2E3643"))(n_age)
+  
+  # TeNT / cMNTB: richer, warmer red-orange range
+  red_palette <- colorRampPalette(
+    c("#E7B7AD","#D59080","#C16A55","#A9493A","#8C3026","#6F1F18","#51140F"))(n_age)
+  
+  color_for_age_group <- function(age, group) {
+    idx <- match(as.character(age), unique_ages); if (is.na(idx)) idx <- 1L
+    if (group %in% c("TeNT","cMNTB")) red_palette[idx] else gray_palette[idx]
+  }
+  point_colors <- mapply(color_for_age_group, pca_data$Age, pca_data$Group)
+  
+  # Validate axes
+  xcol <- dim_pair[1]; ycol <- dim_pair[2]
+  
+  # ---- compute distances & stats ------------------------------------------
+  age_group_combos <- unique(pca_data[, c("Age","Group")])
+  ellipsoid_stats <- dplyr::tibble(Age=character(), Group=character(), PointsInside=integer(), Threshold=numeric(), IDs=character())
+  topk_closest <- list()
+  centroid_coords <- dplyr::tibble(Age=character(), Group=character(), PC1=numeric(), PC2=numeric(), PC3=numeric())
+  
+  compute_distances <- function(X, center_vec, cov_mat = NULL) {
+    if (distance_method == "euclidean") {
+      dif <- sweep(X, 2, center_vec, "-"); sqrt(rowSums(dif^2))
+    } else {
+      if (is.null(cov_mat)) stop("cov_mat is required for Mahalanobis")
+      cov_pd <- make_pd(cov_mat, eps = md_eps)
+      mahalanobis(X, center = center_vec, cov = cov_pd)
+    }
+  }
+  
+  for (i in seq_len(nrow(age_group_combos))) {
+    ag <- age_group_combos$Age[i]
+    gp <- age_group_combos$Group[i]
+    
+    sub3d <- pca_data %>% dplyr::filter(Age == ag, Group == gp) %>% dplyr::select(PC1,PC2,PC3)
+    if (nrow(sub3d) > 2) {
+      center3d <- colMeans(sub3d)
+      centroid_coords <- dplyr::bind_rows(centroid_coords, dplyr::tibble(Age=ag, Group=gp, PC1=center3d["PC1"], PC2=center3d["PC2"], PC3=center3d["PC3"]))
+      
+      group_cells <- pca_data %>% dplyr::filter(Age == ag, Group == gp)
+      coords3d <- as.matrix(group_cells[, c("PC1","PC2","PC3")])
+      dists <- compute_distances(X = coords3d, center_vec = as.numeric(center3d), cov_mat = if (distance_method == "mahalanobis") cov(coords3d) else NULL)
+      pca_data$DistanceToCentroid[match(group_cells$CellID, pca_data$CellID)] <- dists
+      
+      n_take <- min(top_n, nrow(group_cells))
+      topk <- group_cells %>% mutate(Distance = dists) %>% arrange(Distance) %>% slice(1:n_take) %>% select(CellID, Distance)
+      pca_data$Top5Highlight[pca_data$CellID %in% as.character(topk$CellID)] <- TRUE
+      topk_closest[[paste0(ag, "_", gp)]] <- topk
+      
+      # 95% inclusion (3D), unchanged
+      S3 <- make_pd(cov(sub3d), eps = md_eps)
+      thr <- qchisq(0.95, df = 3)
+      target_coords <- if (inclusion_scope == "within") coords3d else as.matrix(pca_data[, c("PC1","PC2","PC3")])
+      D2 <- mahalanobis(target_coords, center = center3d, cov = S3)
+      inside_mask <- D2 <= thr
+      cells_df <- if (inclusion_scope == "within") group_cells else pca_data
+      inside_cells <- cells_df[inside_mask, c("CellID","Group")]
+      
+      ids_by_group <- inside_cells %>% group_by(Group) %>% summarise(IDs = paste(CellID, collapse = ", "), .groups = "drop") %>% mutate(Label = paste0(Group, ": ", IDs))
+      label_string <- paste(ids_by_group$Label, collapse = " | ")
+      ellipsoid_stats <- dplyr::bind_rows(ellipsoid_stats, dplyr::tibble(Age = ag, Group = gp, PointsInside = nrow(inside_cells), Threshold = thr, IDs = label_string))
+    }
+  }
+  
+  # ---- symbols & colors ----------------------------------------------------
+  base_symbol_map <- c("Phasic"="circle", "Tonic"="square")
+  if (!is.null(symbol_by) && symbol_by %in% names(pca_data)) {
+    symbols <- base_symbol_map[as.character(pca_data[[symbol_by]])]; symbols[is.na(symbols)] <- "circle"
+  } else symbols <- rep("circle", nrow(pca_data))
+  if (!is.null(symbol_by_group) && symbol_by_group %in% names(pca_data)) {
+    open_mask <- pca_data[[symbol_by_group]] == "TeNT"; symbols[open_mask] <- paste0(symbols[open_mask], "-open")
+  }
+  
+  hi_idx  <- pca_data$Top5Highlight
+  reg_idx <- !hi_idx
+  
+  # ---- build 2D plot -------------------------------------------------------
+  plt <- plot_ly()
+  
+  for (i in seq_len(nrow(age_group_combos))) {
+    ag <- age_group_combos$Age[i]
+    gp <- age_group_combos$Group[i]
+    sub <- pca_data %>% dplyr::filter(Age == ag, Group == gp)
+    if (nrow(sub) > 2) {
+      xy <- as.matrix(sub[, c(xcol, ycol)])
+      cov2 <- make_pd(stats::cov(xy), eps = md_eps)
+      center2 <- colMeans(xy)
+      ell <- generate_ellipse_2d(center2, cov2, k_sd = ellipse_level)  # filled cloud
+      final_col <- color_for_age_group(ag, gp)
+      
+      plt <- plt %>%
+        add_trace(
+          data = ell, x = ~x, y = ~y,
+          type = "scatter", mode = "lines",
+          fill = "toself",
+          fillcolor = toRGB(final_col, alpha = 0.18),
+          line = list(width = 0.6, color = toRGB(final_col, alpha = 0.25)),
+          hoverinfo = "none",
+          showlegend = FALSE
+        ) %>%
+        add_trace(
+          x = center2[1], y = center2[2],
+          type = "scatter", mode = "markers",
+          marker = list(size = 10, color = final_col, symbol = "x"),
+          hoverinfo = "text",
+          text = paste0("Centroid<br>Age: ", ag, "<br>Group: ", gp),
+          showlegend = FALSE
+        )
+      
+      # NOTE: removed the spoke lines from highlighted cells to centroid
+    }
+  }
+  
+  if (any(reg_idx)) {
+    plt <- plt %>%
+      add_trace(
+        data = pca_data[reg_idx, ],
+        x = as.formula(paste0("~", xcol)),
+        y = as.formula(paste0("~", ycol)),
+        type = "scatter", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group),
+        hoverinfo = "text",
+        marker = list(size = 8, color = point_colors[reg_idx],
+                      symbol = symbols[reg_idx], opacity = 0.25),
+        showlegend = FALSE
+      )
+  }
+  
+  if (any(hi_idx)) {
+    plt <- plt %>%
+      add_trace(
+        data = pca_data[hi_idx, ],
+        x = as.formula(paste0("~", xcol)),
+        y = as.formula(paste0("~", ycol)),
+        type = "scatter", mode = "markers",
+        text = ~paste0("ID: ", CellID, "<br>Age: ", Age, "<br>Group: ", Group,
+                       "<br>Distance: ", round(DistanceToCentroid, 3)),
+        hoverinfo = "text",
+        marker = list(size = 10, color = point_colors[hi_idx],
+                      symbol = symbols[hi_idx], opacity = 1),
+        name = paste0("Top-", top_n, " closest"),
+        showlegend = FALSE
+      )
+  }
+  
+  plt <- plt %>%
+    layout(
+      xaxis = list(title = xcol, showgrid = grid, zeroline = FALSE),
+      yaxis = list(title = ycol, showgrid = grid, zeroline = FALSE),
+      hovermode = "closest",
+      paper_bgcolor = "white",
+      plot_bgcolor  = "white"
+    )
+  
+  print(plt)
+  
+  list(
+    kmeans_result   = km,
+    pca_data        = pca_data,
+    ellipsoid_stats = ellipsoid_stats,
+    centroid_coords = centroid_coords,
+    topk_closest    = topk_closest,
+    distance_method = distance_method,
+    top_n           = top_n,
+    dim_pair        = dim_pair,
+    ellipse_level   = ellipse_level,
+    inclusion_scope = inclusion_scope
+  )
 }
 
 
@@ -3024,6 +4279,310 @@ plot_pca_projection_factominer <- function(projected_results) {
   print(p)
 }
 
+
+## PERMANOVA after kmeans  ----
+
+
+# -- Mahalanobis helpers (pooled covariance; robust optional) -------------------
+.whiten_for_mahalanobis <- function(X, robust = FALSE, pooled_cov = NULL) {
+  X <- as.matrix(X)
+  if (is.null(pooled_cov)) {
+    if (robust) {
+      if (!requireNamespace("robustbase", quietly = TRUE)) {
+        stop("Install 'robustbase' for robust covariance: install.packages('robustbase')")
+      }
+      S <- robustbase::covMcd(X)$cov
+    } else {
+      S <- stats::cov(X)
+    }
+  } else {
+    S <- pooled_cov
+  }
+  C <- chol(S, pivot = TRUE)
+  invC <- backsolve(C, diag(ncol(X)))
+  X %*% invC  # Euclidean in whitened space == Mahalanobis in original
+}
+
+.compute_distance <- function(X, method = "euclidean",
+                              robust = FALSE, pooled_cov = NULL) {
+  if (tolower(method) == "mahalanobis") {
+    Y <- .whiten_for_mahalanobis(X, robust = robust, pooled_cov = pooled_cov)
+    return(stats::dist(Y, method = "euclidean"))
+  } else if (tolower(method) == "euclidean") {
+    return(stats::dist(X, method = "euclidean"))
+  } else {
+    if (!requireNamespace("vegan", quietly = TRUE)) {
+      stop("Install 'vegan' for non-euclidean distances: install.packages('vegan')")
+    }
+    return(vegan::vegdist(X, method = method))
+  }
+}
+
+# -- Custom pairwise PERMANOVA using vegan::adonis2 -----------------------------
+pairwise_permanova_custom <- function(X, groups,
+                                      method = "euclidean",
+                                      permutations = 999,
+                                      p.adjust.method = "BH",
+                                      robust = FALSE,
+                                      pooled_cov = NULL,
+                                      recompute_cov_for_pairs = FALSE) {
+  if (!requireNamespace("vegan", quietly = TRUE)) {
+    stop("Package 'vegan' is required. install.packages('vegan')")
+  }
+  groups <- as.factor(groups)
+  lvls <- levels(groups)
+  combs <- utils::combn(lvls, 2, simplify = FALSE)
+  
+  out <- lapply(combs, function(pair) {
+    sel <- groups %in% pair
+    grp <- droplevels(groups[sel])
+    Xsub <- as.matrix(X)[sel, , drop = FALSE]
+    
+    # Basic guardrails
+    tab <- table(grp)
+    ok <- length(tab) == 2 && all(tab >= 2)
+    if (!ok) {
+      return(data.frame(
+        contrast = paste(pair, collapse = " vs "),
+        n1 = ifelse(length(tab) >= 1, tab[1], NA_integer_),
+        n2 = ifelse(length(tab) >= 2, tab[2], NA_integer_),
+        F = NA_real_, R2 = NA_real_, p = NA_real_
+      ))
+    }
+    
+    # Distance: same global covariance by default (recommended),
+    # optionally recompute per pair (set recompute_cov_for_pairs = TRUE)
+    cov_for_pair <- if (recompute_cov_for_pairs) NULL else pooled_cov
+    d <- .compute_distance(Xsub, method, robust = robust, pooled_cov = cov_for_pair)
+    
+    # adonis2 on distance ~ group
+    # Note: adonis2 expects data frame for predictors
+    dfsub <- data.frame(grp = grp)
+    fit <- vegan::adonis2(d ~ grp, data = dfsub, permutations = permutations, by = "margin")
+    
+    data.frame(
+      contrast = paste(pair, collapse = " vs "),
+      n1 = as.integer(tab[1]),
+      n2 = as.integer(tab[2]),
+      F = as.numeric(fit$F[1]),
+      R2 = as.numeric(fit$R2[1]),
+      p = as.numeric(fit$`Pr(>F)`[1])
+    )
+  })
+  
+  res <- do.call(rbind, out)
+  res$p_adj <- p.adjust(res$p, method = p.adjust.method)
+  res[order(res$p_adj), , drop = FALSE]
+}
+
+# -- Main helper: PERMANOVA after your kmeans/PCA function ----------------------
+permanova_after_kmeans <- function(
+    km_out,
+    formula_rhs = "Age * Group",    # e.g., "Age", "Group", "Age + Group", "Age * Group"
+    n_pc = 3,                        # PCs to use (must exist as PC1..PCn)
+    distance = "euclidean",          # "euclidean" | "mahalanobis" | any vegan::vegdist method
+    permutations = 999,
+    pairwise = TRUE,                 # use our custom pairwise function
+    pairwise_factor = c("Age","Group"), # which columns define the groups for pairwise
+    p_adjust = "BH",
+    check_dispersion = TRUE,         # betadisper test
+    robust = FALSE,                  # robust covariance for Mahalanobis
+    pooled_cov = NULL,               # optional precomputed pooled covariance on selected PCs
+    recompute_cov_for_pairs = FALSE, # TRUE to recompute Mahalanobis covariance within each pair
+    seed = 123
+) {
+  if (!requireNamespace("vegan", quietly = TRUE)) {
+    stop("Package 'vegan' is required. install.packages('vegan')")
+  }
+  set.seed(seed)
+  
+  # Basic checks
+  if (!is.list(km_out) || is.null(km_out$pca_data))
+    stop("km_out must be the list returned by kmeans_plotly_age2(), containing $pca_data.")
+  
+  df <- km_out$pca_data
+  
+  # Select PCs
+  pc_names <- paste0("PC", seq_len(n_pc))
+  missing <- setdiff(pc_names, colnames(df))
+  if (length(missing))
+    stop("Requested PCs not found in pca_data: ", paste(missing, collapse = ", "))
+  X <- as.matrix(df[, pc_names, drop = FALSE])
+  
+  # Parse RHS terms from formula and coerce to factor
+  rhs_terms <- unique(grep("[A-Za-z0-9_]+", unlist(strsplit(formula_rhs, "\\W+")), value = TRUE))
+  rhs_terms <- setdiff(rhs_terms, c("as", "factor"))
+  miss_terms <- setdiff(rhs_terms, colnames(df))
+  if (length(miss_terms))
+    stop("Variables in formula_rhs not in pca_data: ", paste(miss_terms, collapse = ", "))
+  for (nm in rhs_terms) if (!is.factor(df[[nm]])) df[[nm]] <- as.factor(df[[nm]])
+  
+  # Build global distance (used for omnibus test + dispersion)
+  d <- .compute_distance(X, method = distance, robust = robust, pooled_cov = pooled_cov)
+  
+  # Omnibus PERMANOVA
+  f <- as.formula(paste("d ~", formula_rhs))
+  permanova <- vegan::adonis2(f, data = df, permutations = permutations, by = "margin")
+  
+  # Dispersion (permutational Levene’s test analogue)
+  dispersion <- NULL
+  if (check_dispersion) {
+    grp_disp <- if (!is.null(pairwise_factor)) {
+      if (!all(pairwise_factor %in% colnames(df)))
+        stop("pairwise_factor contains names not found in pca_data.")
+      interaction(df[, pairwise_factor, drop = FALSE], drop = TRUE)
+    } else if (grepl("\\*", formula_rhs)) {
+      interaction(df[, rhs_terms, drop = FALSE], drop = TRUE)
+    } else if (length(rhs_terms) > 1) {
+      interaction(df[, rhs_terms, drop = FALSE], drop = TRUE)
+    } else {
+      df[[rhs_terms]]
+    }
+    bd <- vegan::betadisper(d, group = grp_disp)
+    disp_test <- vegan::permutest(bd, permutations = permutations)
+    dispersion <- list(betadisper = bd, test = disp_test)
+  }
+  
+  # Pairwise PERMANOVA (custom)
+  pairwise_res <- NULL
+  if (isTRUE(pairwise)) {
+    # Define grouping for pairwise contrasts
+    if (!is.null(pairwise_factor)) {
+      if (!all(pairwise_factor %in% colnames(df)))
+        stop("pairwise_factor contains names not found in pca_data.")
+      grp_pw <- interaction(df[, pairwise_factor, drop = FALSE], drop = TRUE)
+    } else {
+      # default: interaction of all RHS terms
+      grp_pw <- interaction(df[, rhs_terms, drop = FALSE], drop = TRUE)
+    }
+    
+    pairwise_res <- pairwise_permanova_custom(
+      X = X,
+      groups = grp_pw,
+      method = distance,
+      permutations = permutations,
+      p.adjust.method = p_adjust,
+      robust = robust,
+      pooled_cov = if (tolower(distance) == "mahalanobis") pooled_cov else NULL,
+      recompute_cov_for_pairs = recompute_cov_for_pairs
+    )
+  }
+  
+  # Console summary (optional)
+  cat("\n=== PERMANOVA (adonis2) ===\n"); print(permanova)
+  if (!is.null(dispersion)) { cat("\n=== Homogeneity of Dispersion (betadisper) ===\n"); print(dispersion$test) }
+  if (!is.null(pairwise_res)) { cat("\n=== Pairwise PERMANOVA (custom) ===\n"); print(pairwise_res) }
+  
+  invisible(list(
+    settings = list(
+      pcs_used = pc_names,
+      distance = distance,
+      robust = robust,
+      permutations = permutations,
+      formula_rhs = formula_rhs,
+      pairwise = pairwise,
+      pairwise_factor = pairwise_factor,
+      p_adjust = p_adjust,
+      recompute_cov_for_pairs = recompute_cov_for_pairs
+    ),
+    permanova = permanova,
+    dispersion = dispersion,
+    pairwise = pairwise_res
+  ))
+}
+
+
+
+# PERMANOVA heat maps ----
+plot_permanova_heatmaps <- function(res,
+                                    metric_label = "Mahalanobis",
+                                    age_order = c("P0","P1","P2","P3","P4","P6","P9"),
+                                    group_order = c("NonInjected","iMNTB","TeNT")) {
+  library(dplyr)
+  library(tidyr)
+  library(ggplot2)
+  library(viridis)
+  
+  # --- Prepare pairwise table ---
+  df <- res$pairwise %>%
+    tidyr::separate(contrast, into = c("Group1", "Group2"), sep = " vs ") %>%
+    mutate(
+      log_padj = -log10(p_adj + 1e-6),
+      # multi-level asterisk notation by effect size (R²)
+      sig = case_when(
+        p_adj < 0.05 & R2 >= 0.40 ~ "***",   # very strong
+        p_adj < 0.05 & R2 >= 0.25 ~ "**",    # strong
+        p_adj < 0.05 & R2 >= 0.10 ~ "*",     # moderate
+        TRUE ~ ""
+      )
+    )
+  
+  # --- Label formatting function ---
+  extract_age_group <- function(x) {
+    parts <- strsplit(x, "\\.")[[1]]
+    age <- parts[1]
+    group <- ifelse(length(parts) > 1, parts[2], "")
+    paste0(age, "\n", group)
+  }
+  
+  df$Group1_lab <- sapply(df$Group1, extract_age_group)
+  df$Group2_lab <- sapply(df$Group2, extract_age_group)
+  
+  label_order <- as.vector(outer(age_order, group_order, paste, sep="\n"))
+  df$Group1_lab <- factor(df$Group1_lab, levels = label_order)
+  df$Group2_lab <- factor(df$Group2_lab, levels = label_order)
+  
+  # --- Mirror the matrix so it’s square ---
+  df_mirror <- df %>%
+    rename(Group1_lab_tmp = Group2_lab, Group2_lab_tmp = Group1_lab) %>%
+    rename(Group1 = Group2, Group2 = Group1) %>%
+    mutate(Group1_lab = Group1_lab_tmp,
+           Group2_lab = Group2_lab_tmp) %>%
+    select(-Group1_lab_tmp, -Group2_lab_tmp)
+  
+  df_square <- bind_rows(df, df_mirror) %>% distinct()
+  
+  # --- R² heatmap ---
+  p_r2 <- ggplot(df_square, aes(x = Group1_lab, y = Group2_lab, fill = R2)) +
+    geom_tile(color = "grey30") +
+    geom_text(aes(label = sig), color = "white", size = 5, fontface = "bold") +
+    scale_fill_viridis(option = "plasma", direction = -1, limits = c(0, 1)) +
+    coord_fixed() +
+    labs(
+      title = paste("Pairwise PERMANOVA (R² values)", "-", metric_label),
+      subtitle = "Asterisks scale by effect size: * ≥0.10, ** ≥0.25, *** ≥0.40 (FDR<0.05)",
+      x = "Group 1 (Age×Condition)",
+      y = "Group 2 (Age×Condition)",
+      fill = "R²"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid = element_blank()
+    )
+  
+  # --- Significance (-log10(q)) heatmap ---
+  p_q <- ggplot(df_square, aes(x = Group1_lab, y = Group2_lab, fill = log_padj)) +
+    geom_tile(color = "grey30") +
+    geom_text(aes(label = sig), color = "white", size = 5, fontface = "bold") +
+    scale_fill_viridis(option = "magma", direction = -1) +
+    coord_fixed() +
+    labs(
+      title = paste("Pairwise PERMANOVA Significance Map", "-", metric_label),
+      subtitle = "-log10(q-values): darker = more significant",
+      x = "Group 1 (Age×Condition)",
+      y = "Group 2 (Age×Condition)",
+      fill = "-log10(q)"
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      axis.text.x = element_text(angle = 45, hjust = 1),
+      panel.grid = element_blank()
+    )
+  
+  # --- Return both plots ---
+  list(R2_heatmap = p_r2, Significance_heatmap = p_q)
+}
 
 
 

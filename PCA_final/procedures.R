@@ -1,37 +1,40 @@
 # Libraries and fonts -----------------------------------------------------
 if(1){
-  library(MASS)
-  library(tidyverse)
-  library(readr)
-  library(tidyr)
-  library(dplyr)
-  library(matlib)
-  library(pracma)
-  library(FactoMineR)
-  library(FactoInvestigate)
-  library(factoextra)
-  library(corrplot)
   library(ape)
-  library(ggdendro)
-  library(ggpubr)
-  library(ggcorrplot)
-  library(pvclust)
-  library(GGally)
-  library(ggplot2)
-  library(rgl)
-  library(plotly)
-  library(RColorBrewer)
-  library(extrafont)
-  library(ggthemes)
-  library(ggrepel)
   library(caret)
   library(cluster)
-  library(viridis)     
+  library(conflicted)
+  library(corrplot)
+  library(devtools)
+  library(dplyr)
+  library(extrafont)
+  library(factoextra)
+  library(FactoInvestigate)
+  library(FactoMineR)
+  library(ggcorrplot)
+  library(ggdendro)
+  library(ggplot2)
+  library(ggpubr)
+  library(ggrepel)
+  library(GGally)
+  library(ggthemes)
+  library(glue)
   library(grid)
   library(gridExtra)
+  library(matlib)
+  library(MASS)
   library(patchwork)
-  library(conflicted)
-  library(glue)
+  library(plotly)
+  library(pracma)
+  library(pvclust)
+  library(RColorBrewer)
+  library(readr)
+  library(rgl)
+  library(tidyverse)
+  library(tidyr)
+  library(vegan)
+  library(viridis)
+  
   
   conflicted::conflict_prefer("select", "dplyr")
   conflicted::conflict_prefer("layout", "plotly")
@@ -661,7 +664,7 @@ if(1){
     mutate(Age = sub("_(iMNTB|TeNT)","",ID),
            Group= sub(".*_","",ID))
   
-  result_3D_age = kmeans_plotly_age2(
+  result_3D_age = kmeans_plotly_age2_grayRed2(
     pc_scores_kmeans,
     symbol_by = "Firing Pattern",
     symbol_by_group = "Group",
@@ -698,7 +701,7 @@ if(1){
     Cluster == 2 ~ 1,
     Cluster == 3 ~ 2
   ))
- if(1){
+ if(0){
   vp_imntb = vp_by_var_stats(iMNTB_vp, cluster_col = "Cluster",separate = FALSE,center_line = "mean",legend = FALSE)
   vp_tent = vp_by_var_stats(tent_vp, cluster_col = "Cluster",separate = FALSE,center_line = "mean",legend = FALSE)
  }
@@ -711,7 +714,7 @@ if(1){
            Group= sub(".*_","",ID))
 
   
-  closest_centroids_cells = kmeans_plotly_age3(
+  closest_centroids_cells_euclidean = kmeans_plotly_age3(
     data_contra2,
     symbol_by = "Firing Pattern",
     symbol_by_group = "Group",
@@ -721,9 +724,115 @@ if(1){
     nstart = 25,
     auto_select = F,
     grid = "cube",
+    distance_method = "euclidean",
+    top_n = 10)
+  # closest_centroids_cells_mahalanobis = kmeans_plotly_age3(
+  #   data_contra2,
+  #   symbol_by = "Firing Pattern",
+  #   symbol_by_group = "Group",
+  #   color_by = "Age",
+  #   scale_data = FALSE,
+  #   pca = FALSE,
+  #   nstart = 25,
+  #   auto_select = F,
+  #   grid = "cube",
+  #   distance_method = "mahalanobis",
+  #   top_n = 10)
+  
+  closest_centroids_cells_euclidean_pc1_pc2 <- kmeans_plotly_age3_2d_grayRed(
+    data_contra2,
+    symbol_by       = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by        = "Age",
+    scale_data      = FALSE,
+    pca             = FALSE,   # uses your first 3 numeric columns as PC1–PC3 (renamed)
+    nstart          = 25,
+    auto_select     = FALSE,
+    grid            = TRUE,    # show grid lines in 2D (use FALSE to hide)
+    distance_method = "euclidean",
+    top_n           = 5,
+    dim_pair        = c("PC1","PC2")
+  )
+  
+  closest_centroids_cells_euclidean_pc1_pc3 <- kmeans_plotly_age3_2d_grayRed(
+    data_contra2,
+    symbol_by       = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by        = "Age",
+    scale_data      = FALSE,
+    pca             = FALSE,   # uses your first 3 numeric columns as PC1–PC3 (renamed)
+    nstart          = 25,
+    auto_select     = FALSE,
+    grid            = TRUE,    # show grid lines in 2D (use FALSE to hide)
+    distance_method = "euclidean",
+    top_n           = 5,
+    dim_pair        = c("PC1","PC3")
+  )
+  
+  p4_to_p9_df = data_contra2 %>% filter(Age %in% c("P4", "P6", "P9"))
+  
+  closest_centroids_cells_mahal_pc1_pc2 <- kmeans_plotly_age3_2d_grayRed(
+    p4_to_p9_df,
+    symbol_by       = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by        = "Age",
+    scale_data      = FALSE,
+    pca             = FALSE,   # uses your first 3 numeric columns as PC1–PC3 (renamed)
+    nstart          = 25,
+    auto_select     = FALSE,
+    grid            = TRUE,    # show grid lines in 2D (use FALSE to hide)
     distance_method = "mahalanobis",
-    top_n = 5
-  )}
+    top_n           = 5,
+    dim_pair        = c("PC1","PC2")
+  )
+  
+  closest_centroids_cells_mahal_pc1_pc3 <- kmeans_plotly_age3_2d_grayRed(
+    p4_to_p9_df,
+    symbol_by       = "Firing Pattern",
+    symbol_by_group = "Group",
+    color_by        = "Age",
+    scale_data      = FALSE,
+    pca             = FALSE,   # uses your first 3 numeric columns as PC1–PC3 (renamed)
+    nstart          = 25,
+    auto_select     = FALSE,
+    grid            = TRUE,    # show grid lines in 2D (use FALSE to hide)
+    distance_method = "mahalanobis",
+    top_n           = 5,
+    dim_pair        = c("PC1","PC3")
+  )
+    }
 if(0){
   vp_contra = vp_by_var_stats(data_contra_vp, cluster_col = "Cluster",center_line = "mean",legend = FALSE)
+}
+
+if(1){ 
+  res_mahalanobis <- permanova_after_kmeans(
+    km_out = result_3D_data_contra,
+    formula_rhs = "Age * Group",    # omnibus: Age, Group, interaction
+    n_pc = 3,                        # same 3D you used for ellipsoids
+    distance = "mahalanobis",       # matches ellipsoid logic
+    robust = TRUE,                   # robust pooled covariance (optional)
+    permutations = 999,
+    pairwise = TRUE,                 # enable pairwise contrasts
+    pairwise_factor = c("Age","Group"),
+    p_adjust = "BH",
+    check_dispersion = TRUE,
+    recompute_cov_for_pairs = FALSE  # keep same global covariance in pairwise (recommended)
+  )
+  
+  res_euclidean <- permanova_after_kmeans(
+    km_out = result_3D_data_contra,
+    formula_rhs = "Age * Group",    # omnibus: Age, Group, interaction
+    n_pc = 3,                        # same 3D you used for ellipsoids
+    distance = "euclidean",       
+    robust = TRUE,                   # robust pooled covariance (optional)
+    permutations = 999,
+    pairwise = TRUE,                 # enable pairwise contrasts
+    pairwise_factor = c("Age","Group"),
+    p_adjust = "BH",
+    check_dispersion = TRUE,
+    recompute_cov_for_pairs = FALSE  # keep same global covariance in pairwise (recommended)
+  )
+  plots_mahal <- plot_permanova_heatmaps(res_mahalanobis, metric_label = "Mahalanobis")
+  plots_euc <- plot_permanova_heatmaps(res_euclidean, metric_label = "Euclidean")
 }
