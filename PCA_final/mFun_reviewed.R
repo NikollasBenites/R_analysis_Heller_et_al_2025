@@ -354,147 +354,187 @@ plot_cumulative_var <- function(
 # 
 
 plot_clusters <- function(
-    clusters,
     df,
-    title = "Hierarchical Clustering",
-    color_by = NULL,
-    symbol_by = NULL,
-    symbol_values = NULL,
-    ellipse_by = NULL
+    dims        = c("PC1", "PC2"),
+    color_by    = "Group",            # e.g. "Group" (iMNTB / TeNT) or "Cluster"
+    shape_by    = "Firing Pattern",   # e.g. "Firing Pattern"
+    ellipse_by  = "Group",            # grouping for ellipses
+    title       = "Clusters in PCA space"
 ) {
-  library(ggbiplot)
+  # deps we need
   library(ggplot2)
   library(dplyr)
-  library(viridis)
+  library(rlang)
   
-  # --- prepare matrix for PCA
-  # remove the cluster label column if present
-  mc <- clusters$data.clust %>%
-    dplyr::select(-clust) %>%
-    as.data.frame()
+  # -----------------
+  # 1. sanity checks
+  # -----------------
+  stopifnot(length(dims) == 2)
+  stopifnot(all(dims %in% colnames(df)))
+  stopifnot(color_by %in% colnames(df))
+  stopifnot(shape_by %in% colnames(df))
+  stopifnot(ellipse_by %in% colnames(df))
   
-  dpcac <- stats::prcomp(mc, scale. = TRUE, center = TRUE)
+  xdim <- dims[1]
+  ydim <- dims[2]
   
-  # --- define point color groups
-  if (is.null(color_by)) {
-    color_groups <- as.factor(clusters$data.clust$clust)
-    color_by_label <- "Cluster"
-  } else {
-    if (!(color_by %in% colnames(df))) {
-      stop(paste("Column", color_by, "not found in df."))
-    }
-    color_groups <- df[[color_by]]
-    color_by_label <- color_by
-  }
+  sym_x       <- sym(xdim)
+  sym_y       <- sym(ydim)
+  sym_color   <- sym(color_by)
+  sym_shape   <- sym(shape_by)
+  sym_ellipse <- sym(ellipse_by)
   
-  # --- define ellipse groups
-  if (is.null(ellipse_by)) {
-    ellipse_groups <- color_groups
-    ellipse_by_label <- color_by_label
-  } else {
-    if (!(ellipse_by %in% colnames(df))) {
-      stop(paste("Column", ellipse_by, "not found in df."))
-    }
-    ellipse_groups <- df[[ellipse_by]]
-    ellipse_by_label <- ellipse_by
-  }
+  # ------------------------------------------------
+  # 2. Build the gray-red palette you use elsewhere
+  # ------------------------------------------------
+  # Darker = younger, lighter = older in your other figures.
+  # For this quick view we just want canonical iMNTB gray vs TeNT red.
+  gray_base <- c("#465774", "#66748F", "#8793A7", "#A8B1BF", "#C9CFD7", "#D8DBDE")
+  red_base  <- c("#5C201C", "#822B25", "#A83D32", "#C45F51", "#DD8F84", "#F1C8C2")
   
-  # --- prepare shape mapping
-  if (!is.null(symbol_by)) {
-    if (!(symbol_by %in% colnames(df))) {
-      stop(paste("Column", symbol_by, "not found in df."))
-    }
+  # We'll assign a *single* representative gray and red unless we detect multiple ages,
+  # because in this QC plot we usually just want group separation.
+  if (color_by == "Group") {
+    # pick mid-tone from each ramp so contrast is good
+    color_map <- c(
+      "iMNTB" = gray_base[3],
+      "TeNT"  = red_base[3],
+      "NonInjected" = "#888888"  # fallback if present
+    )
     
-    symbol_data <- as.factor(df[[symbol_by]])
-    unique_symbols <- levels(symbol_data)
-    
-    if (is.null(symbol_values)) {
-      symbol_values <- 0:(length(unique_symbols) - 1) %% 25
+    # keep only entries that actually exist in df
+    present_groups <- unique(df[[color_by]])
+    color_map <- color_map[names(color_map) %in% present_groups]
+  } else if (color_by == "Cluster") {
+    # If you color by numeric k-means cluster, just give each cluster its own hue.
+    # We'll recycle gray/red ranges if you only have 2 clusters, otherwise fallback rainbow-ish.
+    clust_levels <- sort(unique(df[[color_by]]))
+    if (length(clust_levels) == 2) {
+      color_map <- setNames(
+        c(gray_base[3], red_base[3]),
+        c(clust_levels[1], clust_levels[2])
+      )
+      
+    } else {
+      # more than 2 clusters -> generate a palette from both ramps concatenated
+      combo_palette <- c(gray_base, red_base)
+      color_map <- setNames(combo_palette[seq_along(clust_levels)], clust_levels)
     }
-    
-    if (length(symbol_values) < length(unique_symbols)) {
-      stop("Not enough shape values provided for unique groups in 'symbol_by'.")
-    }
-    
-    symbol_map <- stats::setNames(symbol_values, unique_symbols)
   } else {
-    symbol_data <- NULL
-    symbol_map <- NULL
+    # generic discrete palette if user maps to something else
+    uniq_vals <- sort(unique(df[[color_by]]))
+    combo_palette <- c(gray_base, red_base)
+    color_map <- setNames(combo_palette[seq_along(uniq_vals)], uniq_vals)
   }
   
-  # --- choose color scales
-  if (is.numeric(color_groups)) {
-    color_scale <- scale_color_viridis_c(name = color_by_label, option = "D")
-  } else {
-    color_scale <- scale_color_viridis_d(name = color_by_label, option = "D")
-  }
+  # We'll use same map for fill (ellipses)
+  fill_map <- color_map
   
-  if (is.numeric(ellipse_groups)) {
-    fill_scale <- scale_fill_viridis_c(name = ellipse_by_label, option = "D")
-  } else {
-    fill_scale <- scale_fill_viridis_d(name = ellipse_by_label, option = "D")
-  }
-  
-  # --- build the base biplot with ellipses
-  pc <- ggbiplot::ggbiplot(
-    dpcac,
-    groups          = ellipse_groups,  # grouping for ellipses
-    obs.scale       = 1,
-    ellipse         = TRUE,
-    ellipse.prob    = 0.68,
-    ellipse.alpha   = 0.05,
-    ellipse.linewidth = 0.5,
-    var.scale       = 1,
-    choices         = c(1, 2),
-    varname.adjust  = 1.5,
-    labels.size     = 4,
-    alpha           = 0.01,
-    varname.size    = 5,
-    varname.color   = "grey60",
-    var.axes        = FALSE
-  )
-  
-  # Now layer our own points with the correct aesthetics
-  pc <- pc +
+  # ------------------------------------------------
+  # 3. Build the plot
+  # ------------------------------------------------
+  p <- ggplot(df, aes(x = !!sym_x, y = !!sym_y)) +
+    # Ellipse per group (1 SD-ish since level = 0.68)
+    stat_ellipse(
+      aes(color = !!sym_ellipse, fill = !!sym_ellipse),
+      type        = "norm",
+      level       = 0.68,
+      alpha       = 0.15,
+      linewidth   = 0.6,
+      show.legend = FALSE
+    ) +
+    # Actual cells
     geom_point(
       aes(
-        x = dpcac$x[, 1],
-        y = dpcac$x[, 2],
-        color = color_groups,
-        shape = if (!is.null(symbol_by)) symbol_data else NULL
+        color = !!sym_color,
+        shape = !!sym_shape
       ),
-      alpha = 0.7,
-      size  = 6
+      size  = 3,
+      alpha = 0.85,
+      stroke = 0.4
     ) +
-    color_scale +
-    fill_scale +
-    coord_cartesian(xlim = c(-9, 9), ylim = c(-5, 5)) +
-    ggtitle(title) +
-    theme_minimal() +
+    scale_color_manual(values = color_map) +
+    scale_fill_manual(values  = fill_map) +
+    labs(
+      x     = xdim,
+      y     = ydim,
+      color = color_by,
+      shape = shape_by,
+      title = title
+    ) +
+    theme_minimal(base_size = 14) +
     theme(
-      text = element_text(family = "Arial", colour = "black", size = 16),
-      plot.title = element_text(hjust = 0.5, size = 20),
-      legend.position = "right"
-    ) +
-    guides(
-      color = guide_legend(
-        title = color_by_label,
-        override.aes = list(alpha = 1)
-      ),
-      fill = guide_legend(
-        title = ellipse_by_label,
-        override.aes = list(alpha = 0.3)
-      ),
-      shape = if (!is.null(symbol_by)) guide_legend(title = symbol_by) else "none"
+      panel.border    = element_rect(color = "black", fill = NA, linewidth = 0.6),
+      legend.position = "right",
+      plot.title      = element_text(hjust = 0.5, size = 18),
+      text            = element_text(family = "Arial", colour = "black")
     )
   
-  # apply manual shape map if needed
-  if (!is.null(symbol_by)) {
-    pc <- pc + scale_shape_manual(values = symbol_map)
+  return(p)
+}
+
+
+
+
+# plot_cluster_simple() --------------------------------------------------------
+plot_clusters_simple <- function(
+    df,
+    dims        = c("PC1","PC2"),
+    color_by    = "Group",
+    shape_by    = "Firing Pattern",
+    ellipse_by  = "Group",
+    title       = "Clusters in PCA space"
+) {
+  stopifnot(all(dims %in% colnames(df)))
+  
+  xdim <- dims[1]; ydim <- dims[2]
+  sym_x <- rlang::sym(xdim); sym_y <- rlang::sym(ydim)
+  sym_color <- rlang::sym(color_by); sym_shape <- rlang::sym(shape_by)
+  sym_ellipse <- rlang::sym(ellipse_by)
+  
+  gray_palette <- c("#465774", "#66748F", "#8793A7", "#A8B1BF", "#C9CFD7", "#D8DBDE")
+  red_palette  <- c("#5C201C", "#822B25", "#A83D32", "#C45F51", "#DD8F84", "#F1C8C2")
+  
+  group_levels <- sort(unique(df[[color_by]]))
+  color_map <- if (any(grepl("TeNT", group_levels, ignore.case = TRUE))) {
+    c("iMNTB" = gray_palette[3], "TeNT" = red_palette[3])
+  } else {
+    setNames(gray_palette[seq_along(group_levels)], group_levels)
   }
   
-  print(pc)
-  return(pc)
+  p <- ggplot(df, aes(x = !!sym_x, y = !!sym_y)) +
+    stat_ellipse(
+      aes(color = !!sym_ellipse, fill = !!sym_ellipse),
+      type = "norm",
+      level = 0.68,
+      alpha = 0.15,
+      linewidth = 0.6,
+      show.legend = FALSE
+    ) +
+    geom_point(
+      aes(color = !!sym_color, shape = !!sym_shape),
+      size = 3,
+      alpha = 0.85,
+      stroke = 0.4
+    ) +
+    scale_color_manual(values = color_map) +
+    scale_fill_manual(values = color_map) +
+    labs(
+      x = xdim,
+      y = ydim,
+      color = color_by,
+      shape = shape_by,
+      title = title
+    ) +
+    theme_minimal(base_size = 14) +
+    theme(
+      panel.border = element_rect(color = "black", fill = NA, linewidth = 0.6),
+      legend.position = "right",
+      plot.title = element_text(hjust = 0.5, size = 18),
+      text = element_text(family = "Arial", colour = "black")
+    )
+  
+  return(p)
 }
 
 
@@ -561,6 +601,7 @@ plot_pca_correlation <- function(
     cl.ratio = 0.8
   )
 }
+
 
 
 
@@ -2116,26 +2157,29 @@ investigate_pca <- function(
 
 pca_clusters <- function(
     res.pca,
-    dim      = 1:2,
-    nclust   = -1,
-    selec    = "cos2",
-    coef     = 10,
-    mmax     = 100,
-    nmax     = 100
+    dim    = 1:3,   # which PCs to use
+    nclust = 3      # how many clusters you want
 ) {
-  clusters <- FactoMineR::classif(
-    res.pca,
-    dim     = dim,
-    nclust  = nclust,
-    selec   = selec,
-    coef    = coef,
-    mmax    = mmax,
-    nmax    = nmax,
-    graph   = FALSE
-  )
+  # 1. Get individual coordinates in PCA space
+  # FactoMineR::PCA stores scores at res.pca$ind$coord
+  coords <- as.data.frame(res.pca$ind$coord[, dim, drop = FALSE])
   
-  return(clusters)
+  # Make sure columns have nice names like "PC1","PC2","PC3"
+  pc_names <- paste0("PC", dim)
+  colnames(coords) <- pc_names
+  
+  # 2. k-means in that reduced space
+  km <- kmeans(coords, centers = nclust, nstart = 25)
+  
+  # 3. Attach cluster label
+  coords$Cluster <- factor(km$cluster)
+  
+  # 4. Also attach rownames (cell IDs) so we can merge with df_tmp later
+  coords$CellID <- rownames(res.pca$ind$coord)
+  
+  return(coords)
 }
+
 
 
 # split_by_variable() ----------------------------------------------------
@@ -6294,6 +6338,91 @@ plot_permanova_heatmaps <- function(res,
   list(
     R2_heatmap           = p_r2,
     Significance_heatmap = p_q
+  )
+}
+
+
+
+#### helper: save_figure() ####################################################
+save_figure <- function(plot_obj,
+                        filename,
+                        width  = 10,
+                        height = 8,
+                        dpi    = 600,
+                        outdir = "fig_output",
+                        format = c("pdf", "png")) {
+  # Ensure the output folder exists
+  if (!dir.exists(outdir)) dir.create(outdir, recursive = TRUE)
+  
+  # Match and normalize the format argument
+  format <- match.arg(format)
+  file_ext <- paste0(".", format)
+  file_path <- file.path(outdir, paste0(tools::file_path_sans_ext(filename), file_ext))
+  
+  message("Saving: ", file_path)
+  
+  if (format == "pdf") {
+    # Use cairo_pdf to preserve fonts and vector lines
+    ggplot2::ggsave(
+      filename = file_path,
+      plot     = plot_obj,
+      width    = width,
+      height   = height,
+      device   = cairo_pdf
+    )
+  } else {
+    # Default to high-resolution PNG
+    ggplot2::ggsave(
+      filename = file_path,
+      plot     = plot_obj,
+      width    = width,
+      height   = height,
+      dpi      = dpi,
+      units    = "in"
+    )
+  }
+}
+
+#prep_pca_input -----------------
+
+prep_pca_input <- function(df_in,
+                           id_col = "ID",
+                           firing_col = "Firing Pattern") {
+  # df_in: a data frame that includes ID, Firing Pattern, and numeric ephys columns
+  
+  # 1. full copy
+  df_tmp <- as.data.frame(df_in)
+  
+  # 2. numeric-only block for PCA (drop ID + firing pattern)
+  if (!all(c(id_col, firing_col) %in% colnames(df_tmp))) {
+    stop("prep_pca_input(): expected columns not found: ",
+         paste(setdiff(c(id_col, firing_col), colnames(df_tmp)), collapse=", "))
+  }
+  
+  m_tmp <- df_tmp %>%
+    dplyr::select(!all_of(c(id_col, firing_col)))
+  
+  # sanity: no non-numeric columns going into PCA
+  if (!all(sapply(m_tmp, is.numeric))) {
+    bad_cols <- names(m_tmp)[!sapply(m_tmp, is.numeric)]
+    stop("prep_pca_input(): non-numeric columns in m_tmp: ",
+         paste(bad_cols, collapse=", "))
+  }
+  
+  # 3. ID + numeric (drop firing pattern only)
+  m_ID_tmp <- df_tmp %>%
+    dplyr::select(!all_of(firing_col))
+  
+  # 4. firing pattern + numeric (drop ID only)
+  m_fire_tmp <- df_tmp %>%
+    dplyr::select(!all_of(id_col))
+  
+  # Return a named list so you always get all pieces.
+  list(
+    df_tmp      = df_tmp,
+    m_tmp       = m_tmp,
+    m_ID_tmp    = m_ID_tmp,
+    m_fire_tmp  = m_fire_tmp
   )
 }
 

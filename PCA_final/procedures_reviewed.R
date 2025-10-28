@@ -1,5 +1,5 @@
-###############################################################################
-# procedures.R
+
+# procedures_reviewed.R -----------------------------------------------------------------
 #
 # Master analysis workflow:
 # - load packages / data
@@ -17,7 +17,7 @@
 #   - plot_pca(), plot_pca_fviz(), plot_pca_scree(), plot_cumulative_var(), ...
 #   - kmeans_plotly_age2(), kmeans_plotly_age3(), kmeans_plotly_age3_2d_grayRed()
 #   - permanova_after_kmeans(), plot_permanova_heatmaps(), etc.
-###############################################################################
+
 
 #### 1. Libraries and setup ###################################################
 suppressPackageStartupMessages({
@@ -55,8 +55,6 @@ suppressPackageStartupMessages({
   library(conflicted)
 })
 
-
-
 # --- Figure out where this script lives, setwd() there if running non-interactive
 if (!interactive()) {
   this_file <- tryCatch(
@@ -86,11 +84,26 @@ conflicted::conflict_prefer("select", "dplyr")
 conflicted::conflict_prefer("layout", "plotly")
 conflicted::conflict_prefer("filter", "dplyr")
 
+#### 1b. Reproducibility metadata ############################################
+analysis_seed <- 123
+set.seed(analysis_seed)
+
+session_info <- list(
+  timestamp      = Sys.time(),
+  R_version      = R.version.string,
+  platform       = .Platform$OS.type,    # fixed: .Platform, not R.Platform
+  R_arch         = .Platform$r_arch,
+  analysis_seed  = analysis_seed,
+  wd             = getwd()
+)
+print(session_info)
+
+
 
 #### 2. Input file names ######################################################
 
 filename          <- "TeNT_Ephys_latency.csv"
-danPCscores       <- "PCA_Scores_Clusters.csv"
+PCscores       <- "PCA_Scores_Clusters.csv"
 projected_data    <- "P4_P6_project_P9.csv"
 data_contra_file  <- "Combined_projection_all_v2.csv"
 data_contra_vp_fn <- "data_contra_vp.csv"
@@ -106,13 +119,40 @@ if ("Latency" %in% colnames(df)) {
   df <- df[!is.na(df$Latency) & !is.nan(df$Latency), ]
 }
 
-pc_scores_dan   <- load_data(danPCscores,    make_id = FALSE)
+pc_scores_dan   <- load_data(PCscores,    make_id = FALSE)
 project_data    <- load_data(projected_data, make_id = FALSE)
 
 data_contra     <- load_data(data_contra_file,  make_id = FALSE)
 data_contra_vp  <- load_data(data_contra_vp_fn, make_id = FALSE)
 data_contra2    <- load_data(data_P0_file,      make_id = FALSE)  # P0-inclusive version
 
+
+#### 3b. Basic data QC ########################################################
+
+required_cols_main <- c("ID", "Firing_Pattern",
+                        "Rinput","Tau","RMP","I thres.","AP amp","AP HW",
+                        "AP thres.","Max. dep.","Max. rep ","Sag")
+
+missing_main <- setdiff(required_cols_main, colnames(df))
+if (length(missing_main) > 0) {
+  warning("df is missing expected columns: ",
+          paste(missing_main, collapse = ", "))
+}
+
+if (!("Latency" %in% colnames(df))) {
+  message("Note: 'Latency' column not found in df. Proceeding without Latency.")
+}
+
+# Check ID format Age_Group
+bad_ids <- df$ID[!grepl("^P[0-9]+_", df$ID)]
+if (length(bad_ids) > 0) {
+  warning("Some IDs don't look like 'P4_iMNTB' / 'P6_TeNT': ",
+          paste(unique(bad_ids), collapse = ", "))
+}
+
+# Quick table for sanity
+message("Counts by Age x Group from df$ID:")
+print(table(sub("_(.*)$","", df$ID), sub("^(P[0-9]+_)", "", df$ID)))
 
 #### 4. Derive clean numeric matrices and split by Age/Group ##################
 # We build:
@@ -202,61 +242,95 @@ for (age in ages) {
 
 #### 5. (Optional) Classic PCA analyses / plots ###############################
 # NOTE:
-#   These are exploratory blocks. Leave them commented.
-#   You can uncomment locally when you want to run them.
+#   These are exploratory blocks. if(0)
+#   You can set if(1) locally when you want to run them.
 
-# --- Example: run PCA on a subset (prcomp + FactoMineR) ----------------------
-# ncp <- 3
-# dpca <- prcomp(m, scale. = TRUE, center = TRUE, retx = TRUE)
-# res.pca <- FactoMineR::PCA(m, ncp = ncp, graph = FALSE)
 
 # --- Example: PCA on P9_iMNTB only ------------------------------------------
-# df_tmp    <- as.data.frame(P9_iMNTB)
-# m_tmp     <- df_tmp %>% dplyr::select(!c("ID","Firing Pattern"))
-# m_ID_tmp  <- df_tmp %>% dplyr::select(!c("Firing Pattern"))
-# m_fire_tmp<- df_tmp %>% dplyr::select(!c("ID"))
-# ncp       <- 3
-# dpca      <- prcomp(m_tmp, scale. = TRUE, center = TRUE, retx = TRUE)
-# res.pca   <- FactoMineR::PCA(as.data.frame(m_tmp), ncp = ncp, graph = FALSE)
+if(0){
+  pca_in_P9 <- prep_pca_input(P9_iMNTB,
+                              id_col     = "ID",
+                              firing_col = "Firing Pattern")
+  
+  df_tmp     <- pca_in_P9$df_tmp
+  m_tmp      <- pca_in_P9$m_tmp
+  m_ID_tmp   <- pca_in_P9$m_ID_tmp
+  m_fire_tmp <- pca_in_P9$m_fire_tmp
+  
+  ncp  <- 3
+  dpca <- prcomp(m_tmp, scale. = TRUE, center = TRUE, retx = TRUE)
+  res.pca <- FactoMineR::PCA(m_tmp, ncp = ncp, graph = FALSE)
+}
 
-# --- Example: compare ages/groups and run PCA on the combined data ----------
-# df_tmp <- rbind(P4_data, P9_data)
-# m_tmp  <- df_tmp %>% dplyr::select(!c("ID","Firing Pattern"))
-# ncp    <- 3
-# dpca   <- prcomp(m_tmp, scale. = TRUE, center = TRUE, retx = TRUE)
-# res.pca<- FactoMineR::PCA(m_tmp, ncp = ncp, graph = FALSE)
+# --- Example: compare ages/groups and run PCA on the combined data P4 P6 P9 ----------
+if(0){
+  combo_df <- rbind(P4_TeNT, P6_TeNT, P9_TeNT) #Here it is possible to set the df you want to analyse together
+  
+  pca_in_combo <- prep_pca_input(combo_df,
+                                 id_col     = "ID",
+                                 firing_col = "Firing Pattern")
+  
+  df_tmp     <- pca_in_combo$df_tmp
+  m_tmp      <- pca_in_combo$m_tmp
+  m_ID_tmp  <- pca_in_combo$m_ID_tmp
+  m_fire_tmp <- pca_in_combo$m_fire_tmp
+  
+  ncp  <- 3
+  dpca <- prcomp(m_tmp, scale. = TRUE, center = TRUE, retx = TRUE)
+  res.pca <- FactoMineR::PCA(m_tmp, ncp = ncp, graph = FALSE)
+  }
 
 # (More combos like P4_iMNTB vs P9_iMNTB, etc., follow the same pattern.)
 
 
-#### 6. (Optional) PCA visualization helpers ##################################
-# All of these plotting helpers come from myFun.R; leaving examples commented.
-
-# # Scree plot
-# p_scree <- plot_pca_scree(
-#   res.pca,
-#   bar_fill  = "grey30",
-#   bar_color = "white",
-#   title     = "Scree Plot"
-# )
-
-# # Cumulative variance
-# p_cumvar <- plot_cumulative_var(
-#   dpca,
-#   gradient   = c("lightblue", "grey30"),
-#   show_line  = FALSE
-# )
-# print(p_cumvar)
-
-# # PCA scatter with clusters, etc.
-# clusters <- pca_clusters(res.pca)
-# p_clusters <- plot_clusters(
-#   clusters,
-#   df_tmp,
-#   symbol_by     = "Firing Pattern",
-#   symbol_values = c(19,17)
-# )
-
+if(0){
+  #### 6. (Optional) PCA visualization helpers ##################################
+    # scree
+  p_scree <- plot_pca_scree(
+    res.pca,
+    bar_fill  = "grey30",
+    bar_color = "white",
+    title     = "Scree Plot"
+  )
+  print(p_scree)
+  
+  # cumulative variance
+  p_cumvar <- plot_cumulative_var(
+    dpca,
+    gradient   = c("lightblue", "grey30"),
+    show_line  = FALSE
+  )
+  print(p_cumvar)
+  
+  # k-means clusters in PC space
+  clusters <- pca_clusters(
+    res.pca,
+    dim    = 1:3,
+    nclust = 3
+  )
+  
+  # attach CellID to df_tmp so we can merge metadata
+  df_for_plot <- df_tmp
+  df_for_plot$CellID <- rownames(res.pca$ind$coord)
+  
+  clusters_merged <- dplyr::left_join(
+    clusters,
+    df_for_plot,
+    by = "CellID"
+  )
+  
+  # now plot directly from clusters_merged
+  p_clusters <- plot_clusters(
+    df         = clusters_merged,
+    dims       = c("PC1","PC2"),          # or c("PC1","PC3")
+    color_by   = "Cluster",               # color by k-means cluster/or Group
+    shape_by   = "Firing Pattern",        # shape by firing pattern
+    ellipse_by = "Cluster",               # ellipses per cluster
+    title      = "QC: k-means clusters in PCA space"
+  )
+  print(p_clusters)
+  
+}
 
 #### 7. PCA projection across ages / conditions ###############################
 # Goal:
@@ -296,8 +370,9 @@ projected_results <- multi_pca_projection_factominer(
 )
 
 # If desired:
-# plot_pca_projection_factominer(projected_results)
-
+if(0){
+plot_pca_projection_factominer(projected_results)
+}
 
 #### 8. Build merged score tables for downstream k-means ######################
 # We combine all projected PC scores (PC1..PC3) with metadata:
@@ -356,7 +431,7 @@ pc_scores_kmeans <- pc_scores_f_id_3d %>%
   )
 
 # gray/red age-group ellipsoids in PC space
-# NOTE: this call uses the cleaned version (merged grayRed variants)
+# NOTE: this call uses the cleaned version 
 result_3D_age <- kmeans_plotly_age2(
   data             = pc_scores_kmeans,
   symbol_by        = "Firing Pattern",
@@ -370,9 +445,10 @@ result_3D_age <- kmeans_plotly_age2(
 )
 
 # Optionally: compare violin plots of raw features by cluster or by Age group
-# m_3d_a <- merge_col(data_id, result_3D_age$pca_data, merge_col = "Age")
-# vp_by_var(m_3d_a, cluster_col = "Age", center_line = "mean", separate = FALSE, legend = FALSE)
-
+if(0){
+m_3d_a <- merge_col(data_id, result_3D_age$pca_data, merge_col = "Age")
+vp_by_var(m_3d_a, cluster_col = "Age", center_line = "mean", separate = FALSE, legend = FALSE)
+}
 
 #### 10. Contra side analysis #################################################
 # Prepare 'data_contra' and run the same style of 3D clustering / ellipsoids,
@@ -408,11 +484,12 @@ data_contra_vp <- data_contra_vp %>%
   )
 
 # Example downstream violin plot calls:
-# vp_imntb <- vp_by_var_stats(iMNTB_vp, cluster_col = "Cluster",
-#                             separate = FALSE, center_line = "mean", legend = FALSE)
-# vp_tent  <- vp_by_var_stats(tent_vp,   cluster_col = "Cluster",
-#                             separate = FALSE, center_line = "mean", legend = FALSE)
-
+if(0){
+vp_imntb <- vp_by_var_stats(iMNTB_vp, cluster_col = "Cluster",
+                            separate = FALSE, center_line = "mean", legend = FALSE)
+vp_tent  <- vp_by_var_stats(tent_vp,   cluster_col = "Cluster",
+                            separate = FALSE, center_line = "mean", legend = FALSE)
+}
 
 #### 11. Contra side INCLUDING P0 #############################################
 # We keep P0 in (data_contra2), compute closest-centroid lines and 2D/3D plots
@@ -549,11 +626,35 @@ plots_euc <- plot_permanova_heatmaps(
 )
 
 # You can print them (ggplot objects):
-# print(plots_mahal$R2_heatmap)
-# print(plots_mahal$Significance_heatmap)
-# print(plots_euc$R2_heatmap)
-# print(plots_euc$Significance_heatmap)
+print(plots_mahal$R2_heatmap)
+print(plots_mahal$Significance_heatmap)
+print(plots_euc$R2_heatmap)
+print(plots_euc$Significance_heatmap)
 
-###############################################################################
-# End of procedures.R
-###############################################################################
+# Save PERMANOVA heatmaps
+save_figure(plots_mahal$R2_heatmap,           "PERMANOVA_R2_mahalanobis.png")
+save_figure(plots_mahal$Significance_heatmap, "PERMANOVA_sig_mahalanobis.png")
+save_figure(plots_euc$R2_heatmap,             "PERMANOVA_R2_euclidean.png")
+save_figure(plots_euc$Significance_heatmap,   "PERMANOVA_sig_euclidean.png")
+
+#### 13. Save analysis workspace snapshot ####################################
+saveRDS(
+  list(
+    pc_scores_kmeans   = pc_scores_kmeans,
+    projected_results  = projected_results,
+    result_3D_age      = result_3D_age,
+    result_3D_data_contra = result_3D_data_contra,
+    res_mahalanobis    = res_mahalanobis,
+    res_euclidean      = res_euclidean,
+    closest_centroids_cells_euclidean = closest_centroids_cells_euclidean,
+    closest_centroids_cells_euclidean_pc1_pc2 = closest_centroids_cells_euclidean_pc1_pc2,
+    closest_centroids_cells_mahal_pc1_pc2     = closest_centroids_cells_mahal_pc1_pc2
+  ),
+  file = file.path(script_dir, "analysis_snapshot.rds")
+)
+
+message("Saved snapshot to analysis_snapshot.rds")
+
+
+# End of procedures_reviewed.R ###############################################################################
+
