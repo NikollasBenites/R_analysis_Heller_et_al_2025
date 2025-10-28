@@ -27,3 +27,12 @@
 *.nrn
 *_inc
 *.dylib
+
+#Exceptions
+!important.TeNT_Ephys_latency.csv
+!important.TeNT_Ephys_latency.csv
+!important.PCA_Scores_Clusters.csv
+!important.P4_P6_project_P9.csv
+!important.Combined_projection_all_v2.csv
+!important.data_contra_vp.csv
+!important.Combined_projection_all_v2.csv

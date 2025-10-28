@@ -9,7 +9,7 @@
 # - run PERMANOVA + plot significance heatmaps
 #
 # NOTE:
-#   This script assumes myFun.R is in the same directory and defines:
+#   This script assumes myFun_reviewed.R is in the same directory and defines:
 #   - load_data()
 #   - split_by_variable()
 #   - merge_col()
