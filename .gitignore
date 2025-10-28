@@ -29,10 +29,9 @@
 *.dylib
 
 #Exceptions
-!important.TeNT_Ephys_latency.csv
-!important.TeNT_Ephys_latency.csv
-!important.PCA_Scores_Clusters.csv
-!important.P4_P6_project_P9.csv
-!important.Combined_projection_all_v2.csv
-!important.data_contra_vp.csv
-!important.Combined_projection_all_v2.csv
+# Exceptions (track specific CSVs)
+!CSV_files/TeNT_Ephys_latency.csv
+!CSV_files/PCA_Scores_Clusters.csv
+!CSV_files/P4_P6_project_P9.csv
+!CSV_files/Combined_projection_all_v2.csv
+!CSV_files/data_contra_vp.csv
