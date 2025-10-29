@@ -1,7 +1,5 @@
 # Developmental PCA / Clustering Pipeline for MNTB Neurons
 
-Repository: R_analysis_Heller_et_al_2025
-
 This repository contains the complete analysis pipeline used to quantify and visualize developmental changes in MNTB principal neurons, including group-specific effects (iMNTB vs TeNT).
 The pipeline performs:
 
@@ -17,7 +15,10 @@ cluster geometry summaries (ellipsoids, centroids, closest cells)
 
 PERMANOVA (Euclidean and Mahalanobis distance) with significance heatmaps
 
-This code was used to generate the figures and statistical results for Heller & Benites et al., 2025.
+This code was used to generate the figures and statistical results for Heller et al., 2025.
+
+It's necessary having RStudio Version 2025.09.1+401 (2025.09.1+401) and R 4.4.3 to load and run the code.
+
 
 ---
 

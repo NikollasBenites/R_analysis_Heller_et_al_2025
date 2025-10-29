@@ -9,7 +9,7 @@
 # - run PERMANOVA + plot significance heatmaps
 #
 # NOTE:
-#   This script assumes myFun_reviewed.R is in the same directory and defines:
+#   This script assumes mFun_reviewed.R is in the same directory and defines:
 #   - load_data()
 #   - split_by_variable()
 #   - merge_col()
@@ -75,7 +75,7 @@ if (!interactive()) {
   message("Interactive session, using getwd(): ", script_dir)
 }
 
-# --- now that WD is correct, source helper functions from same folder ----
+# --- now that WD is correct, source helper functions from same folder ---
 source(file.path(script_dir, "mFun_reviewed.R"))
 message("Loaded myFun_reviewed.R")
 
@@ -98,17 +98,12 @@ session_info <- list(
 )
 print(session_info)
 
-
-
 #### 2. Input file names ######################################################
 
 filename          <- "TeNT_Ephys_latency.csv"
-PCscores       <- "PCA_Scores_Clusters.csv"
-projected_data    <- "P4_P6_project_P9.csv"
-data_contra_file  <- "Combined_projection_all_v2.csv"
-data_contra_vp_fn <- "data_contra_vp.csv"
-data_P0_file      <- "Combined_projection_all_v2.csv"   # appears same path as data_contra_file
-
+combined_all_projection  <- "Combined_projection_all_v2.csv"
+data_contra_vp_p4_to_p9 <- "data_contra_vp.csv"
+data_iMNTB_inProgress <- "P4&6iMNTB_mapped_P9iMNTB_with_Features_Clusters.csv"
 
 #### 3. Load raw data and basic filtering #####################################
 
@@ -119,13 +114,9 @@ if ("Latency" %in% colnames(df)) {
   df <- df[!is.na(df$Latency) & !is.nan(df$Latency), ]
 }
 
-pc_scores_dan   <- load_data(PCscores,    make_id = FALSE)
-project_data    <- load_data(projected_data, make_id = FALSE)
-
-data_contra     <- load_data(data_contra_file,  make_id = FALSE)
-data_contra_vp  <- load_data(data_contra_vp_fn, make_id = FALSE)
-data_contra2    <- load_data(data_P0_file,      make_id = FALSE)  # P0-inclusive version
-
+combined_all_projection    <- load_data(combined_all_projection,  make_id = FALSE)
+data_contra_vp_p4_to_p9  <- load_data(data_contra_vp_p4_to_p9, make_id = FALSE)
+data_iMNTB_inProgress <- load_data(data_iMNTB_inProgress, make_id = FALSE)
 
 #### 3b. Basic data QC ########################################################
 
@@ -432,7 +423,7 @@ pc_scores_kmeans <- pc_scores_f_id_3d %>%
 
 # gray/red age-group ellipsoids in PC space
 # NOTE: this call uses the cleaned version 
-result_3D_age <- kmeans_plotly_age2(
+result_3D_age_p4_to_p9 <- kmeans_plotly_age2(
   data             = pc_scores_kmeans,
   symbol_by        = "Firing Pattern",
   symbol_by_group  = "Group",
@@ -446,22 +437,22 @@ result_3D_age <- kmeans_plotly_age2(
 
 # Optionally: compare violin plots of raw features by cluster or by Age group
 if(0){
-m_3d_a <- merge_col(data_id, result_3D_age$pca_data, merge_col = "Age")
+m_3d_a <- merge_col(data_id, result_3D_age_p4_to_p9$pca_data, merge_col = "Age")
 vp_by_var(m_3d_a, cluster_col = "Age", center_line = "mean", separate = FALSE, legend = FALSE)
 }
 
 #### 10. Contra side analysis #################################################
-# Prepare 'data_contra' and run the same style of 3D clustering / ellipsoids,
+# Prepare 'combined_all_projection' and run the same style of 3D clustering / ellipsoids,
 # then prep for PERMANOVA.
 
-data_contra <- data_contra %>%
+combined_all_projection <- combined_all_projection %>%
   mutate(
     Age   = sub("_(iMNTB|TeNT|NonInjected)", "", ID),
     Group = sub(".*_",                       "", ID)
   )
 
-result_3D_data_contra <- kmeans_plotly_age2(
-  data             = data_contra,
+result_3D_combined_all_projection <- kmeans_plotly_age2(
+  data             = combined_all_projection,
   symbol_by        = "Firing Pattern",
   symbol_by_group  = "Group",
   color_by         = "Age",
@@ -473,7 +464,7 @@ result_3D_data_contra <- kmeans_plotly_age2(
 )
 
 # Re-map clusters for downstream plotting (optional)
-data_contra_vp <- data_contra_vp %>%
+data_contra_vp_p4_to_p9 <- data_contra_vp_p4_to_p9 %>%
   mutate(
     Cluster = dplyr::case_when(
       Cluster == 1 ~ 3,
@@ -483,26 +474,56 @@ data_contra_vp <- data_contra_vp %>%
     )
   )
 
+data_iMNTB_vp_p4_to_p9 <- data_iMNTB_inProgress %>% select(-c(Dim.1:Dim.10))
+colnames(data_iMNTB_vp_p4_to_p9) <- c(
+  "ID",
+  "Type",
+  "Firing Pattern",
+  "Rinput",
+  "Tau",
+  "I thres.",
+  "AP amp",
+  "AP HW",
+  "AP thres.",
+  "Max. dep.",
+  "Max. rep ",
+  "Sag",
+  "RMP",
+  "Cluster"
+)
+
+# Re-map clusters for downstream plotting (optional)
+data_iMNTB_vp_p4_to_p9 <- data_iMNTB_vp_p4_to_p9 %>%
+  mutate(
+    Cluster = dplyr::case_when(
+      Cluster == 3 ~ 1,
+      Cluster == 2 ~ 3,
+      Cluster == 1 ~ 2,
+      TRUE         ~ Cluster
+    )
+  )
+
+
 # Example downstream violin plot calls:
-if(0){
-vp_imntb <- vp_by_var_stats(iMNTB_vp, cluster_col = "Cluster",
+if(1){
+vp_imntb <- vp_by_var_stats(data_iMNTB_vp_p4_to_p9, cluster_col = "Cluster",
                             separate = FALSE, center_line = "mean", legend = FALSE)
-vp_tent  <- vp_by_var_stats(tent_vp,   cluster_col = "Cluster",
+vp_tent  <- vp_by_var_stats(data_contra_vp_p4_to_p9,   cluster_col = "Cluster",
                             separate = FALSE, center_line = "mean", legend = FALSE)
 }
 
 #### 11. Contra side INCLUDING P0 #############################################
-# We keep P0 in (data_contra2), compute closest-centroid lines and 2D/3D plots
+# We keep P0 in (combined_all_projection), compute closest-centroid lines and 2D/3D plots
 # using kmeans_plotly_age3() / kmeans_plotly_age3_2d().
 
-data_contra2 <- data_contra2 %>%
+combined_all_projection <- combined_all_projection %>%
   mutate(
     Age   = sub("_(iMNTB|TeNT|NonInjected)", "", ID),
     Group = sub(".*_",                       "", ID)
   )
 
 closest_centroids_cells_euclidean <- kmeans_plotly_age3(
-  data              = data_contra2,
+  data              = combined_all_projection,
   symbol_by         = "Firing Pattern",
   symbol_by_group   = "Group",
   color_by          = "Age",
@@ -517,7 +538,7 @@ closest_centroids_cells_euclidean <- kmeans_plotly_age3(
 
 # 2D projections: color/shape rules from grayRed version, dim pairs selectable
 closest_centroids_cells_euclidean_pc1_pc2 <- kmeans_plotly_age3_2d(
-  data              = data_contra2,
+  data              = combined_all_projection,
   symbol_by         = "Firing Pattern",
   symbol_by_group   = "Group",
   color_by          = "Age",
@@ -532,7 +553,7 @@ closest_centroids_cells_euclidean_pc1_pc2 <- kmeans_plotly_age3_2d(
 )
 
 closest_centroids_cells_euclidean_pc1_pc3 <- kmeans_plotly_age3_2d(
-  data              = data_contra2,
+  data              = combined_all_projection,
   symbol_by         = "Firing Pattern",
   symbol_by_group   = "Group",
   color_by          = "Age",
@@ -547,7 +568,7 @@ closest_centroids_cells_euclidean_pc1_pc3 <- kmeans_plotly_age3_2d(
 )
 
 # Subset without P0 for Mahalanobis highlight examples (P4/P6/P9 only)
-p4_to_p9_df <- data_contra2 %>%
+p4_to_p9_df <- combined_all_projection %>%
   dplyr::filter(Age %in% c("P4", "P6", "P9"))
 
 closest_centroids_cells_mahal_pc1_pc2 <- kmeans_plotly_age3_2d(
@@ -588,7 +609,7 @@ closest_centroids_cells_mahal_pc1_pc3 <- kmeans_plotly_age3_2d(
 # Then we visualize significance matrices using plot_permanova_heatmaps().
 
 res_mahalanobis <- permanova_after_kmeans(
-  km_out                 = result_3D_data_contra,
+  km_out                 = result_3D_combined_all_projection,
   formula_rhs            = "Age * Group",
   n_pc                   = 3,
   distance               = "mahalanobis",
@@ -602,7 +623,7 @@ res_mahalanobis <- permanova_after_kmeans(
 )
 
 res_euclidean <- permanova_after_kmeans(
-  km_out                 = result_3D_data_contra,
+  km_out                 = result_3D_combined_all_projection,
   formula_rhs            = "Age * Group",
   n_pc                   = 3,
   distance               = "euclidean",
@@ -642,8 +663,8 @@ saveRDS(
   list(
     pc_scores_kmeans   = pc_scores_kmeans,
     projected_results  = projected_results,
-    result_3D_age      = result_3D_age,
-    result_3D_data_contra = result_3D_data_contra,
+    result_3D_age_p4_to_p9      = result_3D_age_p4_to_p9,
+    result_3D_combined_all_projection = result_3D_combined_all_projection,
     res_mahalanobis    = res_mahalanobis,
     res_euclidean      = res_euclidean,
     closest_centroids_cells_euclidean = closest_centroids_cells_euclidean,
