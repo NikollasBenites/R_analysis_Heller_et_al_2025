@@ -116,6 +116,7 @@ if ("Latency" %in% colnames(df)) {
 
 combined_all_projection    <- load_data(combined_all_projection,  make_id = FALSE)
 data_contra_vp_p4_to_p9  <- load_data(data_contra_vp_p4_to_p9, make_id = FALSE)
+data_contra_vp_p4_to_p9  <- merge_col_by_keys(data_contra_vp_p4_to_p9,df,merge_col = "Latency",key_col1 = "Cell_ID")
 data_iMNTB_inProgress <- load_data(data_iMNTB_inProgress, make_id = FALSE)
 
 #### 3b. Basic data QC ########################################################
@@ -238,7 +239,7 @@ for (age in ages) {
 
 
 # --- Example: PCA on P9_iMNTB only ------------------------------------------
-if(0){
+if(1){
   pca_in_P9 <- prep_pca_input(P9_iMNTB,
                               id_col     = "ID",
                               firing_col = "Firing Pattern")
@@ -274,7 +275,7 @@ if(0){
 # (More combos like P4_iMNTB vs P9_iMNTB, etc., follow the same pattern.)
 
 
-if(0){
+if(1){
   #### 6. (Optional) PCA visualization helpers ##################################
     # scree
   p_scree <- plot_pca_scree(
@@ -435,12 +436,6 @@ result_3D_age_p4_to_p9 <- kmeans_plotly_age2(
   grid             = "cube"
 )
 
-# Optionally: compare violin plots of raw features by cluster or by Age group
-if(0){
-m_3d_a <- merge_col(data_id, result_3D_age_p4_to_p9$pca_data, merge_col = "Age")
-vp_by_var(m_3d_a, cluster_col = "Age", center_line = "mean", separate = FALSE, legend = FALSE)
-}
-
 #### 10. Contra side analysis #################################################
 # Prepare 'combined_all_projection' and run the same style of 3D clustering / ellipsoids,
 # then prep for PERMANOVA.
@@ -475,8 +470,10 @@ data_contra_vp_p4_to_p9 <- data_contra_vp_p4_to_p9 %>%
   )
 
 data_iMNTB_vp_p4_to_p9 <- data_iMNTB_inProgress %>% select(-c(Dim.1:Dim.10))
+data_iMNTB_vp_p4_to_p9 <-  merge_col_by_keys(data_iMNTB_vp_p4_to_p9,df,merge_col = "Latency",key_col1= "ID",key_col2 = "RMP")
 colnames(data_iMNTB_vp_p4_to_p9) <- c(
   "ID",
+  "RMP",
   "Type",
   "Firing Pattern",
   "Rinput",
@@ -488,8 +485,8 @@ colnames(data_iMNTB_vp_p4_to_p9) <- c(
   "Max. dep.",
   "Max. rep ",
   "Sag",
-  "RMP",
-  "Cluster"
+  "Cluster",
+  "Latency"
 )
 
 # Re-map clusters for downstream plotting (optional)

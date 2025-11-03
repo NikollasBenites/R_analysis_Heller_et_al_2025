@@ -366,9 +366,9 @@ plot_clusters <- function(
   library(dplyr)
   library(rlang)
   
-  # -----------------
-  # 1. sanity checks
-  # -----------------
+  # 
+  # 1. sanity checks -----
+  # 
   stopifnot(length(dims) == 2)
   stopifnot(all(dims %in% colnames(df)))
   stopifnot(color_by %in% colnames(df))
@@ -384,9 +384,9 @@ plot_clusters <- function(
   sym_shape   <- sym(shape_by)
   sym_ellipse <- sym(ellipse_by)
   
-  # ------------------------------------------------
-  # 2. Build the gray-red palette you use elsewhere
-  # ------------------------------------------------
+  # 
+  # 2. Build the gray-red palette you use elsewhere -----
+  # 
   # Darker = younger, lighter = older in your other figures.
   # For this quick view we just want canonical iMNTB gray vs TeNT red.
   gray_base <- c("#465774", "#66748F", "#8793A7", "#A8B1BF", "#C9CFD7", "#D8DBDE")
@@ -430,9 +430,9 @@ plot_clusters <- function(
   # We'll use same map for fill (ellipses)
   fill_map <- color_map
   
-  # ------------------------------------------------
-  # 3. Build the plot
-  # ------------------------------------------------
+  # 
+  # 3. Build the plot ---------
+  # 
   p <- ggplot(df, aes(x = !!sym_x, y = !!sym_y)) +
     # Ellipse per group (1 SD-ish since level = 0.68)
     stat_ellipse(
@@ -2283,6 +2283,79 @@ merge_col <- function(
 }
 
 
+
+# merge_col_by_keys() ---------------------------------------------------------
+#
+# Purpose:
+#   Merge (cbind) a selected column from df2 into df1 *only when rows match*
+#   by one or two key columns (e.g., "ID" and "Age").
+#
+# Arguments:
+#   df1          : data.frame. Will form the "left side" of the result.
+#   df2          : data.frame. Source of the column to merge.
+#   merge_col    : string. Column name in df2 to copy.
+#   key_col1     : string. Primary key column name.
+#   key_col2     : string or NULL. Optional secondary key for matching.
+#   new_col_name : string or NULL. Optional name for the copied column.
+#
+# Returns:
+#   A data.frame equal to df1 plus one extra column (NA where no match found).
+#
+# Notes:
+#   - Performs a left join by one or two keys.
+#   - If multiple rows share the same key combination in df2, only the first is used.
+#   - Warns if unmatched keys exist.
+
+merge_col_by_keys <- function(
+    df1,
+    df2,
+    merge_col    = "clust",
+    key_col1     = "ID",
+    key_col2     = NULL,
+    new_col_name = NULL
+) {
+  # Convert to data.frames
+  df1 <- as.data.frame(df1)
+  df2 <- as.data.frame(df2)
+  
+  # Collect key columns
+  key_cols <- c(key_col1, key_col2)
+  key_cols <- key_cols[!is.null(key_cols)]  # remove NULL if only one key
+  
+  # Validation ---------------------------------------------------------------
+  missing_keys_df1 <- setdiff(key_cols, colnames(df1))
+  missing_keys_df2 <- setdiff(key_cols, colnames(df2))
+  
+  if (length(missing_keys_df1) > 0)
+    stop("Error: Key(s) ", paste(missing_keys_df1, collapse=", "), " not found in df1.")
+  if (length(missing_keys_df2) > 0)
+    stop("Error: Key(s) ", paste(missing_keys_df2, collapse=", "), " not found in df2.")
+  if (!(merge_col %in% colnames(df2)))
+    stop("Error: merge_col '", merge_col, "' not found in df2.")
+  
+  # Prepare df2 subset
+  df2_sub <- df2[, c(key_cols, merge_col), drop = FALSE]
+  colnames(df2_sub)[length(key_cols) + 1] <- if (!is.null(new_col_name)) new_col_name else merge_col
+  
+  # Handle duplicates (keep first occurrence)
+  if (any(duplicated(df2_sub[, key_cols, drop = FALSE]))) {
+    warning("Duplicate key combinations in df2 detected; using first occurrence only.")
+    df2_sub <- df2_sub[!duplicated(df2_sub[, key_cols, drop = FALSE]), ]
+  }
+  
+  # Merge (left join)
+  merged_df <- merge(df1, df2_sub, by = key_cols, all.x = TRUE, sort = FALSE)
+  
+  # Warn if any NAs (unmatched)
+  merged_col_name <- if (!is.null(new_col_name)) new_col_name else merge_col
+  if (any(is.na(merged_df[[merged_col_name]]))) {
+    warning("Some key combinations in df1 had no match in df2.")
+  }
+  
+  return(merged_df)
+}
+
+
 # perform_svd() ----------------------------------------------------------
 #
 # Purpose:
@@ -2343,6 +2416,7 @@ perform_svd <- function(
     reconstructed      = svd_res$u %*% diag(svd_res$d) %*% t(svd_res$v)
   ))
 }
+
 
 
 # plot_svd_variance() ----------------------------------------------------
